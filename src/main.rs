@@ -5,16 +5,30 @@ use std::collections::HashMap;
 
 use json::{object, JsonValue};
 
+#[derive(Debug)]
 struct Metadata {
     path: String,
     buffsize: u64,
     tables: Vec<MetaTableDef>,
 }
 
+#[derive(Debug)]
 struct MetaTableDef {
     name: String,
     file: String,
     filetype: String,
+    schema: MetaSchema,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MetaType {
+    LONG,
+    DEC,
+}
+
+#[derive(Debug)]
+struct MetaSchema {
+    columns: Vec<(String, MetaType)>,
 }
 
 #[derive(Debug)]
@@ -29,6 +43,7 @@ struct OpScan {
     file: String,
     filetype: String,
     tab_name: String,
+    schema: Vec<MetaType>,
 }
 
 #[derive(Debug)]
@@ -85,6 +100,7 @@ fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
             tab_name: alias.clone(),
             file: table_meta.file.to_string(),
             filetype: table_meta.filetype.to_string(),
+            schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
         };
 
         if let Some(other_table) = root_op {
@@ -126,16 +142,35 @@ fn main() {
                 name: "LINEITEM".to_string(),
                 file: "lineitem.tbl.bz2".to_string(),
                 filetype: "text".to_string(),
+                schema: MetaSchema {
+                    columns: vec![
+                        ("OKEY".to_string(), MetaType::LONG),
+                        ("PKEY".to_string(), MetaType::LONG),
+                        ("PRICE".to_string(), MetaType::DEC),
+                    ],
+                },
             },
             MetaTableDef {
                 name: "ORDERS".to_string(),
                 file: "order.tbl.bz2".to_string(),
                 filetype: "text".to_string(),
+                schema: MetaSchema {
+                    columns: vec![
+                        ("OKEY".to_string(), MetaType::LONG),
+                        ("ZIP".to_string(), MetaType::LONG),
+                    ],
+                },
             },
             MetaTableDef {
                 name: "PART".to_string(),
                 file: "part.tbl.bz2".to_string(),
                 filetype: "text".to_string(),
+                schema: MetaSchema {
+                    columns: vec![
+                        ("OKEY".to_string(), MetaType::LONG),
+                        ("COST".to_string(), MetaType::DEC),
+                    ],
+                },
             },
         ],
     };
@@ -155,13 +190,32 @@ fn main() {
     println!("{}", plan_to_json(&exec_plan, &meta));
 }
 
+impl MetaType {
+    fn preflight_str(&self) -> String {
+        match self {
+            MetaType::LONG => "long",
+            MetaType::DEC => "dec",
+        }
+        .to_string()
+    }
+}
+
 impl OpScan {
     fn preflight(&self, global: &mut object::Object) {
         let name = format!("scan{}", self.tab_name);
+
+        let schema = JsonValue::Array(
+            self.schema
+                .iter()
+                .map(|c| JsonValue::String(c.preflight_str()))
+                .collect(),
+        );
+
         global[&name] = object! {
             type: "scan",
             filetype: self.filetype.clone(),
             file: self.file.clone(),
+            schema: schema
         };
     }
 }
