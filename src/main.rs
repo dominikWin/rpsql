@@ -128,11 +128,7 @@ fn unwrap_table_name(parts: &[Ident]) -> String {
 }
 
 fn main() {
-    let sql = "SELECT ZIP, SUM(PRICE-COST)
-    FROM LINEITEM L, PART P, ORDERS O
-    WHERE L.PKEY=P.PKEY AND L.OKEY=O.OKEY
-    GROUP BY ZIP
-    ORDER BY ZIP ASC;";
+    let sql = "SELECT * FROM LINEITEM L";
 
     let meta = Metadata {
         path: "drivers/sample_queries/data/".to_string(),
@@ -218,12 +214,28 @@ impl OpScan {
             schema: schema
         };
     }
+
+    fn node(&self) -> JsonValue {
+        let name = format!("scan{}", self.tab_name);
+
+        object! {
+            name: name
+        }
+    }
 }
 
 impl OpJoin {
     fn preflight(&self, global: &mut object::Object) {
         self.build.preflight(global);
         self.probe.preflight(global);
+    }
+
+    fn node(&self) -> JsonValue {
+        object! {
+            name: "joinX",
+            build: self.build.node(),
+            probe: self.probe.node(),
+        }
     }
 }
 
@@ -234,12 +246,20 @@ impl Op {
             Op::JoinOp(op) => op.preflight(global),
         }
     }
+
+    fn node(&self) -> JsonValue {
+        match self {
+            Op::ScanOp(op) => op.node(),
+            Op::JoinOp(op) => op.node(),
+        }
+    }
 }
 
 fn plan_to_json(plan: &Op, meta: &Metadata) -> String {
     let mut data = object! {
         path: meta.path.clone(),
-        buffsize: meta.buffsize
+        buffsize: meta.buffsize,
+        treeroot: plan.node(),
     };
 
     if let JsonValue::Object(obj) = &mut data {
