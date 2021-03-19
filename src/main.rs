@@ -3,13 +3,18 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::collections::HashMap;
 
+use json::{object, JsonValue};
+
 struct Metadata {
+    path: String,
+    buffsize: u64,
     tables: Vec<MetaTableDef>,
 }
 
 struct MetaTableDef {
     name: String,
-    path: String,
+    file: String,
+    filetype: String,
 }
 
 #[derive(Debug)]
@@ -21,7 +26,9 @@ enum Op {
 #[derive(Debug)]
 struct OpScan {
     r#type: String,
-    path: String,
+    file: String,
+    filetype: String,
+    tab_name: String,
 }
 
 #[derive(Debug)]
@@ -31,7 +38,7 @@ struct OpJoin {
     probe: Op,
 }
 
-fn plan(query: &Query, meta: &Metadata) {
+fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
     let setexpr = &query.body;
     let select = match setexpr {
         SetExpr::Select(select) => select,
@@ -65,17 +72,19 @@ fn plan(query: &Query, meta: &Metadata) {
     }
 
     let mut root_op = Option::<Op>::None;
-    for (_alias, table) in table_namespace.into_iter() {
+    for (alias, table) in table_namespace.into_iter() {
+        let table_meta = meta
+            .tables
+            .iter()
+            .filter(|t| t.name == table)
+            .last()
+            .unwrap();
+
         let scan = OpScan {
             r#type: "parallelscan".to_string(),
-            path: meta
-                .tables
-                .iter()
-                .filter(|t| t.name == table)
-                .last()
-                .unwrap()
-                .path
-                .to_string(),
+            tab_name: alias.clone(),
+            file: table_meta.file.to_string(),
+            filetype: table_meta.filetype.to_string(),
         };
 
         if let Some(other_table) = root_op {
@@ -89,7 +98,9 @@ fn plan(query: &Query, meta: &Metadata) {
         }
     }
 
-    println!("{:#?}", root_op.unwrap());
+    // println!("{:#?}", &root_op.unwrap());
+
+    root_op
 }
 
 fn unwrap_table_name(parts: &[Ident]) -> String {
@@ -108,18 +119,23 @@ fn main() {
     ORDER BY ZIP ASC;";
 
     let meta = Metadata {
+        path: "drivers/sample_queries/data/".to_string(),
+        buffsize: 1048576,
         tables: vec![
             MetaTableDef {
                 name: "LINEITEM".to_string(),
-                path: "lineitem.tbl.bz2".to_string(),
+                file: "lineitem.tbl.bz2".to_string(),
+                filetype: "text".to_string(),
             },
             MetaTableDef {
                 name: "ORDERS".to_string(),
-                path: "order.tbl.bz2".to_string(),
+                file: "order.tbl.bz2".to_string(),
+                filetype: "text".to_string(),
             },
             MetaTableDef {
                 name: "PART".to_string(),
-                path: "part.tbl.bz2".to_string(),
+                file: "part.tbl.bz2".to_string(),
+                filetype: "text".to_string(),
             },
         ],
     };
@@ -134,5 +150,47 @@ fn main() {
         Statement::Query(q) => q,
         _ => panic!("Not a query"),
     };
-    plan(&query, &meta);
+    let exec_plan = plan(&query, &meta).unwrap();
+
+    println!("{}", plan_to_json(&exec_plan, &meta));
+}
+
+impl OpScan {
+    fn preflight(&self, global: &mut object::Object) {
+        let name = format!("scan{}", self.tab_name);
+        global[&name] = object! {
+            type: "scan",
+            filetype: self.filetype.clone(),
+            file: self.file.clone(),
+        };
+    }
+}
+
+impl OpJoin {
+    fn preflight(&self, global: &mut object::Object) {
+        self.build.preflight(global);
+        self.probe.preflight(global);
+    }
+}
+
+impl Op {
+    fn preflight(&self, global: &mut object::Object) {
+        match self {
+            Op::ScanOp(op) => op.preflight(global),
+            Op::JoinOp(op) => op.preflight(global),
+        }
+    }
+}
+
+fn plan_to_json(plan: &Op, meta: &Metadata) -> String {
+    let mut data = object! {
+        path: meta.path.clone(),
+        buffsize: meta.buffsize
+    };
+
+    if let JsonValue::Object(obj) = &mut data {
+        plan.preflight(obj);
+    }
+
+    data.dump()
 }

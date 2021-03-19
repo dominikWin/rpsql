@@ -10,3 +10,4 @@ edition = "2018"
 sqlparser = { version = "0.8.0", features = ["serde"] }
 serde = "1.0.124"
 serde_json = { version = "1.0"}
+json = "0.12"
