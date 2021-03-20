@@ -50,7 +50,106 @@ struct OpScan {
 struct OpJoin {
     r#type: String,
     build: Op,
+    build_join_attribute: u32,
     probe: Op,
+    probe_join_attribute: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ColRef {
+    table: String,
+    column: String,
+}
+
+#[derive(Debug)]
+enum Selection {
+    Identity(ColRef),
+    And(Vec<Selection>),
+    Eq(Box<Selection>, Box<Selection>),
+}
+
+impl Metadata {
+    fn attribute_index(&self, colref: &ColRef) -> u32 {
+        let table_meta = self
+            .tables
+            .iter()
+            .filter(|t| t.name == colref.table)
+            .last()
+            .unwrap();
+
+        let table_schema = &table_meta.schema;
+
+        for i in 0..table_schema.columns.len() {
+            let (name, _type) = &table_schema.columns[i];
+            if name == &colref.column {
+                return i as u32;
+            }
+        }
+
+        panic!();
+    }
+}
+
+impl ColRef {
+    fn resolve_aliases(&self, namespace: &HashMap<String, String>) -> ColRef {
+        let true_name = &namespace[&self.table];
+        ColRef {
+            table: true_name.to_string(),
+            column: self.column.clone(),
+        }
+    }
+}
+
+impl From<&[Ident]> for ColRef {
+    fn from(idents: &[Ident]) -> ColRef {
+        if idents.len() != 2 {
+            panic!("You need to have both a table and col name")
+        }
+
+        ColRef {
+            table: idents[0].to_string(),
+            column: idents[1].to_string(),
+        }
+    }
+}
+
+impl Selection {
+    fn as_equijoin(&self) -> Option<(ColRef, ColRef)> {
+        match self {
+            Selection::Eq(l, r) => {
+                if let Selection::Identity(lref) = l.as_ref() {
+                    if let Selection::Identity(rref) = r.as_ref() {
+                        Option::Some((lref.clone(), rref.clone()))
+                    } else {
+                        Option::None
+                    }
+                } else {
+                    Option::None
+                }
+            }
+            _ => Option::None,
+        }
+    }
+}
+
+impl From<&sqlparser::ast::Expr> for Selection {
+    fn from(expr: &Expr) -> Selection {
+        match expr {
+            Expr::BinaryOp { left, op, right } => match op {
+                BinaryOperator::And => {
+                    Selection::And(vec![left.as_ref().into(), right.as_ref().into()])
+                }
+                BinaryOperator::Eq => Selection::Eq(
+                    Box::new(left.as_ref().into()),
+                    Box::new(right.as_ref().into()),
+                ),
+                _ => panic!("Unsupported binary op"),
+            },
+            Expr::CompoundIdentifier(idents) => Selection::Identity(idents.as_slice().into()),
+            Expr::Nested(subexpr) => subexpr.as_ref().into(),
+            _ => panic!("Unsupported selection type"),
+        }
+    }
 }
 
 fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
@@ -87,34 +186,55 @@ fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
     }
 
     let mut root_op = Option::<Op>::None;
-    for (alias, table) in table_namespace.into_iter() {
+
+    let mut scans = Vec::<OpScan>::new();
+    for (_alias, table) in table_namespace.iter() {
         let table_meta = meta
             .tables
             .iter()
-            .filter(|t| t.name == table)
+            .filter(|t| &t.name == table)
             .last()
             .unwrap();
 
         let scan = OpScan {
             r#type: "parallelscan".to_string(),
-            tab_name: alias.clone(),
+            tab_name: table.clone(),
             file: table_meta.file.to_string(),
             filetype: table_meta.filetype.to_string(),
             schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
         };
 
-        if let Some(other_table) = root_op {
-            root_op = Option::Some(Op::JoinOp(Box::new(OpJoin {
-                r#type: "hashjoin".to_string(),
-                probe: Op::ScanOp(Box::new(scan)),
-                build: other_table,
-            })));
-        } else {
-            root_op = Option::Some(Op::ScanOp(Box::new(scan)));
-        }
+        scans.push(scan);
     }
 
-    // println!("{:#?}", &root_op.unwrap());
+    let selection: Selection = select.selection.as_ref().unwrap().into();
+
+    fn _find_scan(scans: &mut Vec<OpScan>, table: &str) -> Option<OpScan> {
+        for i in 0..scans.len() {
+            if &scans[i].tab_name == table {
+                return Option::Some(scans.remove(i));
+            }
+        }
+        Option::None
+    }
+
+    if let Some((ltable_ref, rtable_ref)) = selection.as_equijoin() {
+        let ltable_ref = ltable_ref.resolve_aliases(&table_namespace);
+        let rtable_ref = rtable_ref.resolve_aliases(&table_namespace);
+
+        let ltable = _find_scan(&mut scans, &ltable_ref.table).unwrap();
+        let rtable = _find_scan(&mut scans, &rtable_ref.table).unwrap();
+
+        let join = Op::JoinOp(Box::new(OpJoin {
+            r#type: "hashjoin".to_string(),
+            probe: Op::ScanOp(Box::new(ltable)),
+            probe_join_attribute: meta.attribute_index(&ltable_ref),
+            build: Op::ScanOp(Box::new(rtable)),
+            build_join_attribute: meta.attribute_index(&rtable_ref),
+        }));
+
+        root_op = Some(join);
+    }
 
     root_op
 }
@@ -128,7 +248,11 @@ fn unwrap_table_name(parts: &[Ident]) -> String {
 }
 
 fn main() {
-    let sql = "SELECT * FROM LINEITEM L";
+    let sql = "SELECT ZIP, SUM(PRICE-COST)
+    FROM LINEITEM L, PART P, ORDERS O
+    WHERE L.PKEY=P.PKEY
+    GROUP BY ZIP
+    ORDER BY ZIP ASC;";
 
     let meta = Metadata {
         path: "drivers/sample_queries/data/".to_string(),
@@ -163,7 +287,7 @@ fn main() {
                 filetype: "text".to_string(),
                 schema: MetaSchema {
                     columns: vec![
-                        ("OKEY".to_string(), MetaType::LONG),
+                        ("PKEY".to_string(), MetaType::LONG),
                         ("COST".to_string(), MetaType::DEC),
                     ],
                 },
@@ -174,8 +298,6 @@ fn main() {
     let dialect = GenericDialect {}; // or AnsiDialect, or your own dialect ...
 
     let ast = Parser::parse_sql(&dialect, sql).unwrap().remove(0);
-
-    // println!("{:#?}", ast);
 
     let query: Box<Query> = match ast {
         Statement::Query(q) => q,
@@ -228,6 +350,12 @@ impl OpJoin {
     fn preflight(&self, global: &mut object::Object) {
         self.build.preflight(global);
         self.probe.preflight(global);
+
+        global["joinX"] = object! {
+            type: "hashjoin",
+            buildjattr: self.build_join_attribute,
+            probejattr: self.probe_join_attribute,
+        };
     }
 
     fn node(&self) -> JsonValue {
