@@ -78,12 +78,12 @@ impl OpScan {
 
 impl OpJoin {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.build.name_op(namespace);
+        self.probe.name_op(namespace);
+
         if self.cfg_name.is_none() {
             self.cfg_name = Option::Some(namespace.name_operator("join"));
         }
-
-        self.build.name_op(namespace);
-        self.probe.name_op(namespace);
     }
 
     fn preflight(&self, global: &mut object::Object) {
@@ -108,11 +108,11 @@ impl OpJoin {
 
 impl OpFilter {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.input.name_op(namespace);
+
         if self.cfg_name.is_none() {
             self.cfg_name = Option::Some(namespace.name_operator("filter"));
         }
-
-        self.input.name_op(namespace);
     }
 
     fn preflight(&self, global: &mut object::Object) {
