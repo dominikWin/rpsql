@@ -26,6 +26,7 @@ pub struct OpScan {
     pub tab_name: String,
     pub schema: Vec<MetaType>,
     pub ls: LocalSchema,
+    pub cfg_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -36,6 +37,7 @@ pub struct OpJoin {
     pub probe: Op,
     pub probe_join_attribute: u32,
     pub ls: LocalSchema,
+    pub cfg_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -46,4 +48,5 @@ pub struct OpFilter {
     pub field: u32,
     pub value: String,
     pub ls: LocalSchema,
+    pub cfg_name: Option<String>,
 }

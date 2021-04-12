@@ -28,5 +28,5 @@ fn main() {
     let exec_plan = plan(&query, &meta).unwrap();
 
     // println!("{:#?}", exec_plan);
-    println!("{}", plan_to_json(&exec_plan, &meta));
+    println!("{}", plan_to_json(exec_plan, &meta));
 }

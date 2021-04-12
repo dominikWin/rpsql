@@ -145,6 +145,7 @@ impl Selection {
                             op: "==".to_string(),
                             value: rep.to_string(),
                             ls,
+                            cfg_name: Option::None,
                         }))
                     } else {
                         panic!("Can't match dual-value filter")
@@ -240,6 +241,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
             filetype: table_meta.filetype.to_string(),
             schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
             ls: LocalSchema::from_meta_table(table_meta, alias),
+            cfg_name: Option::None,
         };
 
         scans.push(scan);
@@ -280,6 +282,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
                 build: Op::ScanOp(Box::new(rtable)),
                 build_join_attribute: meta.attribute_index(&rtable_ref),
                 ls,
+                cfg_name: Option::None,
             }));
 
             root_op = Some(join);

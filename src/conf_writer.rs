@@ -1,9 +1,37 @@
+use std::collections::HashMap;
+
 use crate::metadata::{MetaType, Metadata};
 use crate::ops::*;
 
 use json::{object, JsonValue};
 
-pub fn plan_to_json(plan: &Op, meta: &Metadata) -> String {
+struct ConfigNamespace {
+    operators: HashMap<String, u32>,
+}
+
+impl ConfigNamespace {
+    fn new() -> ConfigNamespace {
+        ConfigNamespace {
+            operators: HashMap::new(),
+        }
+    }
+
+    fn name_operator(&mut self, requested_name: &str) -> String {
+        if let Some(n) = self.operators.get(requested_name) {
+            let n = n + 1;
+            self.operators.insert(requested_name.to_string(), n);
+            format!("{}{}", requested_name, n)
+        } else {
+            self.operators.insert(requested_name.to_string(), 1);
+            requested_name.to_string()
+        }
+    }
+}
+
+pub fn plan_to_json(mut plan: Op, meta: &Metadata) -> String {
+    let mut namespace = ConfigNamespace::new();
+    plan.name_op(&mut namespace);
+
     let mut data = object! {
         path: meta.path.clone(),
         buffsize: meta.buffsize,
@@ -18,9 +46,14 @@ pub fn plan_to_json(plan: &Op, meta: &Metadata) -> String {
 }
 
 impl OpScan {
-    fn preflight(&self, global: &mut object::Object) {
-        let name = format!("scan{}", self.tab_name);
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        if self.cfg_name.is_none() {
+            self.cfg_name =
+                Option::Some(namespace.name_operator(&format!("scan{}", self.tab_name)));
+        }
+    }
 
+    fn preflight(&self, global: &mut object::Object) {
         let schema = JsonValue::Array(
             self.schema
                 .iter()
@@ -28,7 +61,7 @@ impl OpScan {
                 .collect(),
         );
 
-        global[&name] = object! {
+        global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "scan",
             filetype: self.filetype.clone(),
             file: self.file.clone(),
@@ -37,20 +70,27 @@ impl OpScan {
     }
 
     fn node(&self) -> JsonValue {
-        let name = format!("scan{}", self.tab_name);
-
         object! {
-            name: name
+            name: self.cfg_name.as_ref().unwrap().to_string(),
         }
     }
 }
 
 impl OpJoin {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        if self.cfg_name.is_none() {
+            self.cfg_name = Option::Some(namespace.name_operator("join"));
+        }
+
+        self.build.name_op(namespace);
+        self.probe.name_op(namespace);
+    }
+
     fn preflight(&self, global: &mut object::Object) {
         self.build.preflight(global);
         self.probe.preflight(global);
 
-        global["joinX"] = object! {
+        global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "hashjoin",
             buildjattr: self.build_join_attribute,
             probejattr: self.probe_join_attribute,
@@ -59,7 +99,7 @@ impl OpJoin {
 
     fn node(&self) -> JsonValue {
         object! {
-            name: "joinX",
+            name: self.cfg_name.as_ref().unwrap().to_string(),
             build: self.build.node(),
             probe: self.probe.node(),
         }
@@ -67,10 +107,18 @@ impl OpJoin {
 }
 
 impl OpFilter {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        if self.cfg_name.is_none() {
+            self.cfg_name = Option::Some(namespace.name_operator("filter"));
+        }
+
+        self.input.name_op(namespace);
+    }
+
     fn preflight(&self, global: &mut object::Object) {
         self.input.preflight(global);
 
-        global["filterX"] = object! {
+        global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "filter",
             op: self.op.clone(),
             field: self.field,
@@ -80,13 +128,21 @@ impl OpFilter {
 
     fn node(&self) -> JsonValue {
         object! {
-            name: "filterX",
+            name: self.cfg_name.as_ref().unwrap().to_string(),
             input: self.input.node(),
         }
     }
 }
 
 impl Op {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        match self {
+            Op::ScanOp(op) => op.name_op(namespace),
+            Op::JoinOp(op) => op.name_op(namespace),
+            Op::FilterOp(op) => op.name_op(namespace),
+        }
+    }
+
     fn preflight(&self, global: &mut object::Object) {
         match self {
             Op::ScanOp(op) => op.preflight(global),
