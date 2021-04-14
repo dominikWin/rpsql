@@ -12,7 +12,7 @@ use metadata::*;
 use planner::*;
 
 fn main() {
-    let sql = "SELECT COST FROM PART P WHERE P.PKEY = 5;";
+    let sql = "SELECT COST FROM PART P, ORDERS O1, ORDERS O2 WHERE ((O1.OKEY = O2.OKEY) AND O1.OKEY = P.PKEY) AND (P.PKEY = 5);";
 
     let meta = Metadata::new();
 

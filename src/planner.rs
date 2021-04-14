@@ -52,7 +52,7 @@ impl Metadata {
             }
         }
 
-        panic!();
+        panic!("Attempting to reference non-existant colref {:?}", colref);
     }
 }
 
@@ -105,21 +105,47 @@ enum Selection {
 }
 
 impl Selection {
-    fn as_equijoin(&self) -> Option<(ColRef, ColRef)> {
+    fn normalized(self) -> Selection {
         match self {
-            Selection::Eq(l, r) => {
-                if let Selection::Identity(lref) = l.as_ref() {
-                    if let Selection::Identity(rref) = r.as_ref() {
-                        Option::Some((lref.clone(), rref.clone()))
+            Selection::And(subselections) => {
+                let mut top_level_subselections = vec![];
+                for subsecection in subselections {
+                    let normalized_subselection = subsecection.normalized();
+                    if let Selection::And(mut nested_subselections) = normalized_subselection {
+                        top_level_subselections.append(&mut nested_subselections);
                     } else {
-                        Option::None
+                        top_level_subselections.push(normalized_subselection);
                     }
-                } else {
-                    Option::None
+                }
+                Selection::And(top_level_subselections)
+            }
+            _ => Selection::And(vec![self]),
+        }
+    }
+
+    fn apply_equijoin(&mut self) -> Option<(ColRef, ColRef)> {
+        let mut out = Option::None;
+
+        if let Selection::And(selections) = self {
+            for i in 0..selections.len() {
+                match &selections[i] {
+                    Selection::Eq(l, r) => {
+                        if let Selection::Identity(lref) = l.as_ref() {
+                            if let Selection::Identity(rref) = r.as_ref() {
+                                out = Option::Some((lref.clone(), rref.clone()));
+                                selections.remove(i);
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
-            _ => Option::None,
+        } else {
+            unreachable!();
         }
+
+        out
     }
 
     fn apply_filter_ops(&self, mut op: Op) -> Op {
@@ -224,9 +250,14 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
     }
 
     let mut root_op = Option::<Op>::None;
+    let selection: Selection = if let Some(filter) = &select.selection {
+        filter.into()
+    } else {
+        Selection::And(vec![])
+    };
+    let mut selection = selection.normalized();
 
-    let mut scans = Vec::<OpScan>::new();
-    for (alias, table) in table_namespace.iter() {
+    fn _make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
         let table_meta = meta
             .tables
             .iter()
@@ -234,59 +265,47 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
             .last()
             .unwrap();
 
-        let scan = OpScan {
+        OpScan {
             r#type: "parallelscan".to_string(),
-            tab_name: table.clone(),
+            tab_name: table.to_string(),
             file: table_meta.file.to_string(),
             filetype: table_meta.filetype.to_string(),
             schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
             ls: LocalSchema::from_meta_table(table_meta, alias),
             cfg_name: Option::None,
+        }
+    }
+
+    while let Some((ltable_ref, rtable_ref)) = selection.apply_equijoin() {
+        let ltable = if let Some(root_op) = root_op {
+            root_op
+        } else {
+            Op::ScanOp(Box::new(_make_scan(
+                table_namespace.get(&ltable_ref.table).unwrap(),
+                &ltable_ref.table,
+                meta,
+            )))
         };
+        let rtable = _make_scan(
+            table_namespace.get(&rtable_ref.table).unwrap(),
+            &rtable_ref.table,
+            meta,
+        );
 
-        scans.push(scan);
-    }
+        let ls = LocalSchema::cat(&ltable.local_schema(), &rtable.ls);
+        let join = Op::JoinOp(Box::new(OpJoin {
+            r#type: "hashjoin".to_string(),
+            probe: ltable,
+            probe_join_attribute: meta
+                .attribute_index(&ltable_ref.resolve_aliases(&table_namespace)),
+            build: Op::ScanOp(Box::new(rtable)),
+            build_join_attribute: meta
+                .attribute_index(&rtable_ref.resolve_aliases(&table_namespace)),
+            ls,
+            cfg_name: Option::None,
+        }));
 
-    let selection: Selection = if let Some(filter) = &select.selection {
-        filter.into()
-    } else {
-        Selection::And(vec![])
-    };
-
-    fn _find_scan(scans: &mut Vec<OpScan>, table: &str) -> Option<OpScan> {
-        for i in 0..scans.len() {
-            if &scans[i].tab_name == table {
-                return Option::Some(scans.remove(i));
-            }
-        }
-        Option::None
-    }
-
-    if scans.len() == 1 {
-        // No join
-        root_op = Some(Op::ScanOp(Box::new(scans.pop().unwrap())));
-    } else {
-        // With join; a shitty dual-table optimizer lives here
-        if let Some((ltable_ref, rtable_ref)) = selection.as_equijoin() {
-            let ltable_ref = ltable_ref.resolve_aliases(&table_namespace);
-            let rtable_ref = rtable_ref.resolve_aliases(&table_namespace);
-
-            let ltable = _find_scan(&mut scans, &ltable_ref.table).unwrap();
-            let rtable = _find_scan(&mut scans, &rtable_ref.table).unwrap();
-
-            let ls = LocalSchema::cat(&ltable.ls, &rtable.ls);
-            let join = Op::JoinOp(Box::new(OpJoin {
-                r#type: "hashjoin".to_string(),
-                probe: Op::ScanOp(Box::new(ltable)),
-                probe_join_attribute: meta.attribute_index(&ltable_ref),
-                build: Op::ScanOp(Box::new(rtable)),
-                build_join_attribute: meta.attribute_index(&rtable_ref),
-                ls,
-                cfg_name: Option::None,
-            }));
-
-            root_op = Some(join);
-        }
+        root_op = Some(join);
     }
 
     if let Some(op) = root_op {
