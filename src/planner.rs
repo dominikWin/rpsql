@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::rc::Rc;
 
 use sqlparser::ast::*;
 
 use crate::metadata::*;
 use crate::ops::*;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColRef {
     pub table: String,
     pub column: String,
@@ -123,18 +125,16 @@ impl Selection {
         }
     }
 
-    fn apply_equijoin(&mut self) -> Option<(ColRef, ColRef)> {
-        let mut out = Option::None;
+    fn potential_equijoins(&self) -> HashSet<(ColRef, ColRef)> {
+        let mut out = HashSet::new();
 
         if let Selection::And(selections) = self {
-            for i in 0..selections.len() {
-                match &selections[i] {
+            for selection in selections {
+                match selection {
                     Selection::Eq(l, r) => {
                         if let Selection::Identity(lref) = l.as_ref() {
                             if let Selection::Identity(rref) = r.as_ref() {
-                                out = Option::Some((lref.clone(), rref.clone()));
-                                selections.remove(i);
-                                break;
+                                out.insert((lref.clone(), rref.clone()));
                             }
                         }
                     }
@@ -142,6 +142,7 @@ impl Selection {
                 }
             }
         } else {
+            // This should be normalized already
             unreachable!();
         }
 
@@ -216,6 +217,113 @@ fn unwrap_table_name(parts: &[Ident]) -> String {
     parts[0].value.to_string()
 }
 
+fn plan_joins(
+    from_namespace: &HashMap<String, String>,
+    potential_joins: &HashSet<(ColRef, ColRef)>,
+    meta: &Metadata,
+) {
+    #[derive(Hash, PartialEq, Eq, Debug)]
+    struct Vertex {
+        table: String,
+        alias: String,
+    }
+
+    #[derive(Hash, PartialEq, Eq, Debug)]
+    struct Edge {
+        left_colref: ColRef,
+        right_colref: ColRef,
+        left: Rc<Vertex>,
+        right: Rc<Vertex>,
+    }
+
+    let mut v = HashSet::<Rc<Vertex>>::new();
+    for (alias, table) in from_namespace.iter() {
+        v.insert(Rc::new(Vertex {
+            table: table.to_string(),
+            alias: alias.to_string(),
+        }));
+    }
+
+    fn _find_vertex(v: &HashSet<Rc<Vertex>>, colref: &ColRef) -> Rc<Vertex> {
+        for test_vertex in v {
+            if test_vertex.alias == colref.table {
+                return Rc::clone(test_vertex);
+            }
+        }
+        panic!("Failed to resolve table {}", colref.table);
+    }
+
+    let mut e = HashSet::<Rc<Edge>>::new();
+    for potential_join in potential_joins {
+        let left = _find_vertex(&v, &potential_join.0);
+        let right = _find_vertex(&v, &potential_join.1);
+        e.insert(Rc::new(Edge {
+            left_colref: potential_join.0.clone(),
+            right_colref: potential_join.1.clone(),
+            left,
+            right,
+        }));
+    }
+
+    fn _partial_hamiltonian_path(
+        v: &HashSet<Rc<Vertex>>,
+        e: &HashSet<Rc<Edge>>,
+        visited: &HashSet<Rc<Vertex>>,
+        current: &Rc<Vertex>,
+    ) -> Option<Vec<Rc<Edge>>> {
+        if v.len() == visited.len() {
+            return Option::Some(Vec::new());
+        }
+
+        for edge in e {
+            let next = if &edge.left == current && !visited.contains(&edge.right) {
+                &edge.right
+            } else if &edge.right == current && !visited.contains(&edge.left) {
+                &edge.left
+            } else {
+                continue;
+            };
+
+            let mut next_visited = visited.clone();
+            next_visited.insert(Rc::clone(next));
+
+            let future = _partial_hamiltonian_path(v, e, &next_visited, &next);
+            if let Some(mut path) = future {
+                path.push(Rc::clone(edge));
+                return Option::Some(path);
+            }
+        }
+
+        Option::None
+    }
+
+    fn _hamiltonian_path(
+        v: &HashSet<Rc<Vertex>>,
+        e: &HashSet<Rc<Edge>>,
+        visited: &HashSet<Rc<Vertex>>,
+    ) -> Option<(Vec<Rc<Edge>>, Rc<Vertex>)> {
+        if v.len() == visited.len() {
+            return Option::None;
+        }
+
+        for starting_vertex in v {
+            let mut visited = HashSet::<Rc<Vertex>>::new();
+            visited.insert(Rc::clone(starting_vertex));
+
+            if let Some(path) = _partial_hamiltonian_path(v, e, &visited, starting_vertex) {
+                return Option::Some((path, Rc::clone(starting_vertex)));
+            }
+        }
+
+        return Option::None;
+    }
+
+    let (path, start) = _hamiltonian_path(&v, &e, &HashSet::new())
+        .expect("No way to represent query with equijoins!");
+
+    println!("Path: {:?}", path);
+}
+
 pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
     let setexpr = &query.body;
     let select = match setexpr {
@@ -255,58 +363,62 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
     } else {
         Selection::And(vec![])
     };
-    let mut selection = selection.normalized();
+    let selection = selection.normalized();
 
-    fn _make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
-        let table_meta = meta
-            .tables
-            .iter()
-            .filter(|t| &t.name == table)
-            .last()
-            .unwrap();
+    let potential_equijoins = selection.potential_equijoins();
 
-        OpScan {
-            r#type: "parallelscan".to_string(),
-            tab_name: table.to_string(),
-            file: table_meta.file.to_string(),
-            filetype: table_meta.filetype.to_string(),
-            schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
-            ls: LocalSchema::from_meta_table(table_meta, alias),
-            cfg_name: Option::None,
-        }
-    }
+    plan_joins(&table_namespace, &potential_equijoins, meta);
 
-    while let Some((ltable_ref, rtable_ref)) = selection.apply_equijoin() {
-        let ltable = if let Some(root_op) = root_op {
-            root_op
-        } else {
-            Op::ScanOp(Box::new(_make_scan(
-                table_namespace.get(&ltable_ref.table).unwrap(),
-                &ltable_ref.table,
-                meta,
-            )))
-        };
-        let rtable = _make_scan(
-            table_namespace.get(&rtable_ref.table).unwrap(),
-            &rtable_ref.table,
-            meta,
-        );
+    // fn _make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
+    //     let table_meta = meta
+    //         .tables
+    //         .iter()
+    //         .filter(|t| &t.name == table)
+    //         .last()
+    //         .unwrap();
 
-        let ls = LocalSchema::cat(&ltable.local_schema(), &rtable.ls);
-        let join = Op::JoinOp(Box::new(OpJoin {
-            r#type: "hashjoin".to_string(),
-            probe: ltable,
-            probe_join_attribute: meta
-                .attribute_index(&ltable_ref.resolve_aliases(&table_namespace)),
-            build: Op::ScanOp(Box::new(rtable)),
-            build_join_attribute: meta
-                .attribute_index(&rtable_ref.resolve_aliases(&table_namespace)),
-            ls,
-            cfg_name: Option::None,
-        }));
+    //     OpScan {
+    //         r#type: "parallelscan".to_string(),
+    //         tab_name: table.to_string(),
+    //         file: table_meta.file.to_string(),
+    //         filetype: table_meta.filetype.to_string(),
+    //         schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
+    //         ls: LocalSchema::from_meta_table(table_meta, alias),
+    //         cfg_name: Option::None,
+    //     }
+    // }
 
-        root_op = Some(join);
-    }
+    // while let Some((ltable_ref, rtable_ref)) = selection.apply_equijoin() {
+    //     let ltable = if let Some(root_op) = root_op {
+    //         root_op
+    //     } else {
+    //         Op::ScanOp(Box::new(_make_scan(
+    //             table_namespace.get(&ltable_ref.table).unwrap(),
+    //             &ltable_ref.table,
+    //             meta,
+    //         )))
+    //     };
+    //     let rtable = _make_scan(
+    //         table_namespace.get(&rtable_ref.table).unwrap(),
+    //         &rtable_ref.table,
+    //         meta,
+    //     );
+
+    //     let ls = LocalSchema::cat(&ltable.local_schema(), &rtable.ls);
+    //     let join = Op::JoinOp(Box::new(OpJoin {
+    //         r#type: "hashjoin".to_string(),
+    //         probe: ltable,
+    //         probe_join_attribute: meta
+    //             .attribute_index(&ltable_ref.resolve_aliases(&table_namespace)),
+    //         build: Op::ScanOp(Box::new(rtable)),
+    //         build_join_attribute: meta
+    //             .attribute_index(&rtable_ref.resolve_aliases(&table_namespace)),
+    //         ls,
+    //         cfg_name: Option::None,
+    //     }));
+
+    //     root_op = Some(join);
+    // }
 
     if let Some(op) = root_op {
         root_op = Some(selection.apply_filter_ops(op));
