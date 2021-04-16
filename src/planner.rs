@@ -217,11 +217,30 @@ fn unwrap_table_name(parts: &[Ident]) -> String {
     parts[0].value.to_string()
 }
 
+fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
+    let table_meta = meta
+        .tables
+        .iter()
+        .filter(|t| &t.name == table)
+        .last()
+        .unwrap();
+
+    OpScan {
+        r#type: "parallelscan".to_string(),
+        tab_name: table.to_string(),
+        file: table_meta.file.to_string(),
+        filetype: table_meta.filetype.to_string(),
+        schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
+        ls: LocalSchema::from_meta_table(table_meta, alias),
+        cfg_name: Option::None,
+    }
+}
+
 fn plan_joins(
     from_namespace: &HashMap<String, String>,
     potential_joins: &HashSet<(ColRef, ColRef)>,
     meta: &Metadata,
-) {
+) -> Op {
     #[derive(Hash, PartialEq, Eq, Debug)]
     struct Vertex {
         table: String,
@@ -242,6 +261,16 @@ fn plan_joins(
             table: table.to_string(),
             alias: alias.to_string(),
         }));
+    }
+
+    // Handle simple case first
+    if v.len() == 1 {
+        let single_tab = v.iter().next().unwrap();
+        return Op::ScanOp(Box::new(make_scan(
+            &single_tab.table,
+            &single_tab.alias,
+            meta,
+        )));
     }
 
     fn _find_vertex(v: &HashSet<Rc<Vertex>>, colref: &ColRef) -> Rc<Vertex> {
@@ -310,7 +339,8 @@ fn plan_joins(
             let mut visited = HashSet::<Rc<Vertex>>::new();
             visited.insert(Rc::clone(starting_vertex));
 
-            if let Some(path) = _partial_hamiltonian_path(v, e, &visited, starting_vertex) {
+            if let Some(mut path) = _partial_hamiltonian_path(v, e, &visited, starting_vertex) {
+                path.reverse(); // We construct on the tail
                 return Option::Some((path, Rc::clone(starting_vertex)));
             }
         }
@@ -321,7 +351,63 @@ fn plan_joins(
     let (path, start) = _hamiltonian_path(&v, &e, &HashSet::new())
         .expect("No way to represent query with equijoins!");
 
-    println!("Path: {:?}", path);
+    fn associate_join(
+        start_vertex: &Rc<Vertex>,
+        current_edge: &Rc<Edge>,
+        future: &[Rc<Edge>],
+        table_namespace: &HashMap<String, String>,
+        meta: &Metadata,
+    ) -> Op {
+        let (start_cref, next_cref, next_vertex) = if start_vertex == &current_edge.left {
+            (
+                &current_edge.left_colref,
+                &current_edge.right_colref,
+                &current_edge.right,
+            )
+        } else {
+            (
+                &current_edge.right_colref,
+                &current_edge.left_colref,
+                &current_edge.left,
+            )
+        };
+
+        let probe_op = if future.is_empty() {
+            Op::ScanOp(Box::new(make_scan(
+                &next_vertex.table,
+                &next_vertex.alias,
+                meta,
+            )))
+        } else {
+            associate_join(
+                &next_vertex,
+                &future[0],
+                &future[1..],
+                table_namespace,
+                meta,
+            )
+        };
+        let build_op = Op::ScanOp(Box::new(make_scan(
+            &start_vertex.table,
+            &start_vertex.alias,
+            meta,
+        )));
+
+        let ls = LocalSchema::cat(&build_op.local_schema(), &probe_op.local_schema());
+        Op::JoinOp(Box::new(OpJoin {
+            r#type: "hashjoin".to_string(),
+            probe: probe_op,
+            probe_join_attribute: meta
+                .attribute_index(&next_cref.resolve_aliases(&table_namespace)),
+            build: build_op,
+            build_join_attribute: meta
+                .attribute_index(&start_cref.resolve_aliases(&table_namespace)),
+            ls,
+            cfg_name: Option::None,
+        }))
+    }
+
+    associate_join(&start, &path[0], &path[1..], from_namespace, meta)
 }
 
 pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
@@ -367,62 +453,11 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
 
     let potential_equijoins = selection.potential_equijoins();
 
-    plan_joins(&table_namespace, &potential_equijoins, meta);
+    root_op = Option::Some(plan_joins(&table_namespace, &potential_equijoins, meta));
 
-    // fn _make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
-    //     let table_meta = meta
-    //         .tables
-    //         .iter()
-    //         .filter(|t| &t.name == table)
-    //         .last()
-    //         .unwrap();
-
-    //     OpScan {
-    //         r#type: "parallelscan".to_string(),
-    //         tab_name: table.to_string(),
-    //         file: table_meta.file.to_string(),
-    //         filetype: table_meta.filetype.to_string(),
-    //         schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
-    //         ls: LocalSchema::from_meta_table(table_meta, alias),
-    //         cfg_name: Option::None,
-    //     }
+    // if let Some(op) = root_op {
+    //     root_op = Some(selection.apply_filter_ops(op));
     // }
-
-    // while let Some((ltable_ref, rtable_ref)) = selection.apply_equijoin() {
-    //     let ltable = if let Some(root_op) = root_op {
-    //         root_op
-    //     } else {
-    //         Op::ScanOp(Box::new(_make_scan(
-    //             table_namespace.get(&ltable_ref.table).unwrap(),
-    //             &ltable_ref.table,
-    //             meta,
-    //         )))
-    //     };
-    //     let rtable = _make_scan(
-    //         table_namespace.get(&rtable_ref.table).unwrap(),
-    //         &rtable_ref.table,
-    //         meta,
-    //     );
-
-    //     let ls = LocalSchema::cat(&ltable.local_schema(), &rtable.ls);
-    //     let join = Op::JoinOp(Box::new(OpJoin {
-    //         r#type: "hashjoin".to_string(),
-    //         probe: ltable,
-    //         probe_join_attribute: meta
-    //             .attribute_index(&ltable_ref.resolve_aliases(&table_namespace)),
-    //         build: Op::ScanOp(Box::new(rtable)),
-    //         build_join_attribute: meta
-    //             .attribute_index(&rtable_ref.resolve_aliases(&table_namespace)),
-    //         ls,
-    //         cfg_name: Option::None,
-    //     }));
-
-    //     root_op = Some(join);
-    // }
-
-    if let Some(op) = root_op {
-        root_op = Some(selection.apply_filter_ops(op));
-    }
 
     root_op
 }
