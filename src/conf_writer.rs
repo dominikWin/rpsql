@@ -90,10 +90,26 @@ impl OpJoin {
         self.build.preflight(global);
         self.probe.preflight(global);
 
+        let mut projection = Vec::<String>::new();
+        for i in 0..self.build.local_schema().columns.len() {
+            projection.push(format!("B${}", i));
+        }
+        for i in 0..self.probe.local_schema().columns.len() {
+            projection.push(format!("P${}", i));
+        }
+
         global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "hashjoin",
             buildjattr: self.build_join_attribute,
             probejattr: self.probe_join_attribute,
+            hash: {
+                fn: "modulo",
+                buckets: 10000,
+            },
+            tuplesperbucket: 4,
+            projection_tuple: projection,
+            threadgroups_tuple: [[0]],
+            allocpolicy: "striped",
         };
     }
 
