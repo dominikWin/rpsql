@@ -15,7 +15,7 @@ pub enum Op {
 }
 
 impl Op {
-    pub fn virtual_schema<'a>(&self) -> VirtualSchema {
+    pub fn virtual_schema(&self) -> VirtualSchema {
         match self {
             Op::ScanOp(op) => op.vs.clone(),
             Op::FilterOp(op) => op.vs.clone(),
