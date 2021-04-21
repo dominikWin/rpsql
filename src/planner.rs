@@ -7,12 +7,6 @@ use sqlparser::ast::*;
 use crate::metadata::*;
 use crate::ops::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ColRef {
-    pub table: String,
-    pub column: String,
-}
-
 impl From<&[Ident]> for ColRef {
     fn from(idents: &[Ident]) -> ColRef {
         if idents.len() != 2 {
@@ -166,7 +160,6 @@ impl Selection {
                     if let Selection::Identity(colref) = l.as_ref() {
                         let ls = op.local_schema();
                         Op::FilterOp(Box::new(OpFilter {
-                            r#type: "filter".to_string(),
                             field: op.local_schema().get_field_idx(colref),
                             input: op,
                             op: "==".to_string(),
@@ -226,7 +219,6 @@ fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
         .unwrap();
 
     OpScan {
-        r#type: "parallelscan".to_string(),
         tab_name: table.to_string(),
         file: table_meta.file.to_string(),
         filetype: table_meta.filetype.to_string(),
@@ -395,7 +387,6 @@ fn plan_joins(
 
         let ls = LocalSchema::cat(&build_op.local_schema(), &probe_op.local_schema());
         Op::JoinOp(Box::new(OpJoin {
-            r#type: "hashjoin".to_string(),
             probe: probe_op,
             probe_join_attribute: meta
                 .attribute_index(&next_cref.resolve_aliases(&table_namespace)),

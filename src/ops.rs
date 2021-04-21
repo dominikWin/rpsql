@@ -1,6 +1,12 @@
 use crate::metadata::MetaType;
 use crate::planner::LocalSchema;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ColRef {
+    pub table: String,
+    pub column: String,
+}
+
 #[derive(Debug)]
 pub enum Op {
     ScanOp(Box<OpScan>),
@@ -20,7 +26,6 @@ impl Op {
 
 #[derive(Debug)]
 pub struct OpScan {
-    pub r#type: String,
     pub file: String,
     pub filetype: String,
     pub tab_name: String,
@@ -31,7 +36,6 @@ pub struct OpScan {
 
 #[derive(Debug)]
 pub struct OpJoin {
-    pub r#type: String,
     pub build: Op,
     pub build_join_attribute: u32,
     pub probe: Op,
@@ -42,7 +46,6 @@ pub struct OpJoin {
 
 #[derive(Debug)]
 pub struct OpFilter {
-    pub r#type: String,
     pub input: Op,
     pub op: String,
     pub field: u32,
