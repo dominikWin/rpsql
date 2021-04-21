@@ -93,6 +93,62 @@ impl VirtualSchema {
 }
 
 #[derive(Debug)]
+struct EqualityFactSet {
+    sets: Vec<HashSet<ColRef>>,
+}
+
+impl EqualityFactSet {
+    fn new() -> EqualityFactSet {
+        EqualityFactSet { sets: Vec::new() }
+    }
+
+    fn insert_rule(&mut self, c1: &ColRef, c2: &ColRef) {
+        let mut c1_idx = Option::None;
+        let mut c2_idx = Option::None;
+        for (i, set) in self.sets.iter().enumerate() {
+            if set.contains(c1) {
+                c1_idx = Option::Some(i);
+            }
+            if set.contains(c2) {
+                c2_idx = Option::Some(i);
+            }
+        }
+
+        match (c1_idx, c2_idx) {
+            (Option::Some(c1_idx), Option::Some(c2_idx)) => {
+                // If they are equal we already know their equality
+                if c1_idx != c2_idx {
+                    let c2_set = self.sets.remove(c2_idx);
+                    self.sets[c1_idx].extend(c2_set);
+                }
+            }
+            (Option::Some(c1_idx), None) => {
+                self.sets[c1_idx].insert(c2.clone());
+            }
+            (Option::None, Option::Some(c2_idx)) => {
+                self.sets[c2_idx].insert(c1.clone());
+            }
+            (Option::None, Option::None) => {
+                let mut newset = HashSet::new();
+                newset.insert(c1.clone());
+                newset.insert(c2.clone());
+                self.sets.push(newset);
+            }
+        }
+    }
+
+    fn are_equal(&self, c1: &ColRef, c2: &ColRef) -> bool {
+        for set in &self.sets {
+            if set.contains(c1) && set.contains(c2) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+#[derive(Debug)]
 enum Selection {
     Identity(ColRef),
     And(Vec<Selection>),
@@ -143,21 +199,21 @@ impl Selection {
         out
     }
 
-    fn apply_filter_ops(&self, mut op: Op) -> Op {
+    fn apply_filter_ops(&self, mut op: Op, existing_equalities: &EqualityFactSet) -> Op {
         match self {
             Selection::Identity(_) => panic!("Identity filter not supported"),
             Selection::Const(_) => panic!("Const filter not supported"),
             Selection::And(subfilters) => {
                 for subfilter in subfilters {
-                    op = subfilter.apply_filter_ops(op);
+                    op = subfilter.apply_filter_ops(op, existing_equalities);
                 }
                 op
             }
             Selection::Eq(l, r) => {
-                if let Selection::Const(_rep) = l.as_ref() {
-                    unimplemented!()
-                } else if let Selection::Const(rep) = r.as_ref() {
-                    if let Selection::Identity(colref) = l.as_ref() {
+                match (l.as_ref(), r.as_ref()) {
+                    (Selection::Const(_), Selection::Const(_)) => unimplemented!(),
+                    (Selection::Identity(colref), Selection::Const(rep))
+                    | (Selection::Const(rep), Selection::Identity(colref)) => {
                         let vs = op.virtual_schema();
                         Op::FilterOp(Box::new(OpFilter {
                             field: op.virtual_schema().get_field_idx(colref),
@@ -167,11 +223,16 @@ impl Selection {
                             vs,
                             cfg_name: Option::None,
                         }))
-                    } else {
-                        panic!("Can't match dual-value filter")
                     }
-                } else {
-                    panic!("Can't match dual-ref filter")
+                    (Selection::Identity(colref1), Selection::Identity(colref2)) => {
+                        if existing_equalities.are_equal(colref1, colref2) {
+                            // Nothing to do!
+                            op
+                        } else {
+                            panic!("Can't apply new identity-identity equality")
+                        }
+                    }
+                    _ => panic!("Unknown equality configuration."),
                 }
             }
         }
@@ -232,7 +293,7 @@ fn plan_joins(
     from_namespace: &HashMap<String, String>,
     potential_joins: &HashSet<(ColRef, ColRef)>,
     meta: &Metadata,
-) -> Op {
+) -> (Op, EqualityFactSet) {
     #[derive(Hash, PartialEq, Eq, Debug)]
     struct Vertex {
         table: String,
@@ -258,11 +319,14 @@ fn plan_joins(
     // Handle simple case first
     if v.len() == 1 {
         let single_tab = v.iter().next().unwrap();
-        return Op::ScanOp(Box::new(make_scan(
-            &single_tab.table,
-            &single_tab.alias,
-            meta,
-        )));
+        return (
+            Op::ScanOp(Box::new(make_scan(
+                &single_tab.table,
+                &single_tab.alias,
+                meta,
+            ))),
+            EqualityFactSet::new(),
+        );
     }
 
     fn _find_vertex(v: &HashSet<Rc<Vertex>>, colref: &ColRef) -> Rc<Vertex> {
@@ -398,10 +462,18 @@ fn plan_joins(
         }))
     }
 
-    associate_join(&start, &path[0], &path[1..], from_namespace, meta)
+    let mut equality_set = EqualityFactSet::new();
+    for edge in &path {
+        equality_set.insert_rule(&edge.left_colref, &edge.right_colref);
+    }
+
+    (
+        associate_join(&start, &path[0], &path[1..], from_namespace, meta),
+        equality_set,
+    )
 }
 
-pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
+pub fn plan(query: &Query, meta: &Metadata) -> Op {
     let setexpr = &query.body;
     let select = match setexpr {
         SetExpr::Select(select) => select,
@@ -434,7 +506,6 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
         }
     }
 
-    let mut root_op = Option::<Op>::None;
     let selection: Selection = if let Some(filter) = &select.selection {
         filter.into()
     } else {
@@ -444,11 +515,11 @@ pub fn plan(query: &Query, meta: &Metadata) -> Option<Op> {
 
     let potential_equijoins = selection.potential_equijoins();
 
-    root_op = Option::Some(plan_joins(&table_namespace, &potential_equijoins, meta));
+    let (op, equality_set) = plan_joins(&table_namespace, &potential_equijoins, meta);
 
-    // if let Some(op) = root_op {
-    //     root_op = Some(selection.apply_filter_ops(op));
-    // }
+    let mut root_op = op;
+
+    root_op = selection.apply_filter_ops(root_op, &equality_set);
 
     root_op
 }

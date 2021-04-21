@@ -25,7 +25,7 @@ fn main() {
         Statement::Query(q) => q,
         _ => panic!("Not a query"),
     };
-    let exec_plan = plan(&query, &meta).unwrap();
+    let exec_plan = plan(&query, &meta);
 
     // println!("{:#?}", exec_plan);
     println!("{}", plan_to_json(exec_plan, &meta));
