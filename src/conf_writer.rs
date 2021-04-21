@@ -91,10 +91,10 @@ impl OpJoin {
         self.probe.preflight(global);
 
         let mut projection = Vec::<String>::new();
-        for i in 0..self.build.local_schema().columns.len() {
+        for i in 0..self.build.virtual_schema().columns.len() {
             projection.push(format!("B${}", i));
         }
-        for i in 0..self.probe.local_schema().columns.len() {
+        for i in 0..self.probe.virtual_schema().columns.len() {
             projection.push(format!("P${}", i));
         }
 

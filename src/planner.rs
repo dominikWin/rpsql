@@ -53,11 +53,11 @@ impl Metadata {
 }
 
 #[derive(Debug, Clone)]
-pub struct LocalSchema {
+pub struct VirtualSchema {
     pub columns: Vec<ColRef>,
 }
 
-impl LocalSchema {
+impl VirtualSchema {
     fn get_field_idx(&self, colref: &ColRef) -> u32 {
         for i in 0..self.columns.len() {
             if colref == &self.columns[i] {
@@ -71,7 +71,7 @@ impl LocalSchema {
         )
     }
 
-    fn from_meta_table(meta_schema: &MetaTableDef, table_alias: &str) -> LocalSchema {
+    fn from_meta_table(meta_schema: &MetaTableDef, table_alias: &str) -> VirtualSchema {
         let mut columns = Vec::new();
 
         for column in &meta_schema.schema.columns {
@@ -81,14 +81,14 @@ impl LocalSchema {
             })
         }
 
-        LocalSchema { columns }
+        VirtualSchema { columns }
     }
 
-    fn cat(schema1: &LocalSchema, schema2: &LocalSchema) -> LocalSchema {
+    fn cat(schema1: &VirtualSchema, schema2: &VirtualSchema) -> VirtualSchema {
         let mut columns = schema1.columns.clone();
         columns.append(&mut schema2.columns.clone());
 
-        LocalSchema { columns }
+        VirtualSchema { columns }
     }
 }
 
@@ -158,13 +158,13 @@ impl Selection {
                     unimplemented!()
                 } else if let Selection::Const(rep) = r.as_ref() {
                     if let Selection::Identity(colref) = l.as_ref() {
-                        let ls = op.local_schema();
+                        let vs = op.virtual_schema();
                         Op::FilterOp(Box::new(OpFilter {
-                            field: op.local_schema().get_field_idx(colref),
+                            field: op.virtual_schema().get_field_idx(colref),
                             input: op,
                             op: "==".to_string(),
                             value: rep.to_string(),
-                            ls,
+                            vs,
                             cfg_name: Option::None,
                         }))
                     } else {
@@ -223,7 +223,7 @@ fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
         file: table_meta.file.to_string(),
         filetype: table_meta.filetype.to_string(),
         schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
-        ls: LocalSchema::from_meta_table(table_meta, alias),
+        vs: VirtualSchema::from_meta_table(table_meta, alias),
         cfg_name: Option::None,
     }
 }
@@ -385,7 +385,7 @@ fn plan_joins(
             meta,
         )));
 
-        let ls = LocalSchema::cat(&build_op.local_schema(), &probe_op.local_schema());
+        let vs = VirtualSchema::cat(&build_op.virtual_schema(), &probe_op.virtual_schema());
         Op::JoinOp(Box::new(OpJoin {
             probe: probe_op,
             probe_join_attribute: meta
@@ -393,7 +393,7 @@ fn plan_joins(
             build: build_op,
             build_join_attribute: meta
                 .attribute_index(&start_cref.resolve_aliases(&table_namespace)),
-            ls,
+            vs,
             cfg_name: Option::None,
         }))
     }
