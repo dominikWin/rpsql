@@ -6,6 +6,7 @@ use sqlparser::ast::*;
 
 use crate::metadata::*;
 use crate::ops::*;
+use crate::optimizer::*;
 use crate::projection::*;
 use crate::selection::*;
 
@@ -19,38 +20,6 @@ impl From<&[Ident]> for ColRef {
             table: idents[0].to_string(),
             column: idents[1].to_string(),
         }
-    }
-}
-
-impl ColRef {
-    fn resolve_aliases(&self, namespace: &HashMap<String, String>) -> ColRef {
-        let true_name = &namespace[&self.table];
-        ColRef {
-            table: true_name.to_string(),
-            column: self.column.clone(),
-        }
-    }
-}
-
-impl Metadata {
-    fn attribute_index(&self, colref: &ColRef) -> u32 {
-        let table_meta = self
-            .tables
-            .iter()
-            .filter(|t| t.name == colref.table)
-            .last()
-            .unwrap();
-
-        let table_schema = &table_meta.schema;
-
-        for i in 0..table_schema.columns.len() {
-            let (name, _type) = &table_schema.columns[i];
-            if name == &colref.column {
-                return i as u32;
-            }
-        }
-
-        panic!("Attempting to reference non-existant colref {:?}", colref);
     }
 }
 
@@ -71,6 +40,10 @@ impl VirtualSchema {
             "Failed to find column reference {:?} in local schema.",
             colref
         )
+    }
+
+    pub fn contains(&self, colref: &ColRef) -> bool {
+        self.columns.contains(colref)
     }
 
     fn from_meta_table(meta_schema: &MetaTableDef, table_alias: &str) -> VirtualSchema {
@@ -339,11 +312,9 @@ fn plan_joins(
         let vs = VirtualSchema::cat(&build_op.virtual_schema(), &probe_op.virtual_schema());
         Op::JoinOp(Box::new(OpJoin {
             probe: probe_op,
-            probe_join_attribute: meta
-                .attribute_index(&next_cref.resolve_aliases(&table_namespace)),
+            probe_join_attribute: next_cref.clone(),
             build: build_op,
-            build_join_attribute: meta
-                .attribute_index(&start_cref.resolve_aliases(&table_namespace)),
+            build_join_attribute: start_cref.clone(),
             vs,
             cfg_name: Option::None,
         }))
@@ -410,6 +381,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     root_op = selection.apply_filter_ops(root_op, &equality_set);
     root_op = projection.apply_project_ops(root_op);
+
+    root_op = pushdown_filters(root_op);
 
     root_op
 }

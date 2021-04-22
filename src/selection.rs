@@ -62,7 +62,7 @@ impl Selection {
         fn _compose_binary_filter(bin_op: &str, op: Op, colref: &ColRef, rep: &str) -> Op {
             let vs = op.virtual_schema();
             Op::FilterOp(Box::new(OpFilter {
-                field: op.virtual_schema().get_field_idx(colref),
+                field: colref.clone(),
                 input: op,
                 op: bin_op.to_string(),
                 value: rep.to_string(),

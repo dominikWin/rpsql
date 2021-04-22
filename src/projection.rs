@@ -44,7 +44,7 @@ impl From<&Vec<sqlparser::ast::SelectItem>> for Projection {
 
 impl Projection {
     pub fn apply_project_ops(&self, op: Op) -> Op {
-        let vs = op.virtual_schema().clone();
+        let vs = op.virtual_schema();
         Op::ProjectionOp(Box::new(OpProjection {
             input: op,
             projection: self.items.clone(),

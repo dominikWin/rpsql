@@ -7,7 +7,7 @@ pub struct ColRef {
     pub column: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Op {
     ScanOp(Box<OpScan>),
     JoinOp(Box<OpJoin>),
@@ -26,7 +26,7 @@ impl Op {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpScan {
     pub file: String,
     pub filetype: String,
@@ -36,27 +36,27 @@ pub struct OpScan {
     pub cfg_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpJoin {
     pub build: Op,
-    pub build_join_attribute: u32,
+    pub build_join_attribute: ColRef,
     pub probe: Op,
-    pub probe_join_attribute: u32,
+    pub probe_join_attribute: ColRef,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpFilter {
     pub input: Op,
     pub op: String,
-    pub field: u32,
+    pub field: ColRef,
     pub value: String,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpProjection {
     pub input: Op,
     pub projection: Vec<ColRef>,

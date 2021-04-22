@@ -5,6 +5,7 @@ use sqlparser::parser::Parser;
 mod conf_writer;
 mod metadata;
 mod ops;
+mod optimizer;
 mod planner;
 mod projection;
 mod selection;

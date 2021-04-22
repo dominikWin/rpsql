@@ -98,10 +98,19 @@ impl OpJoin {
             projection.push(format!("P${}", i));
         }
 
+        let buildjattr = self
+            .build
+            .virtual_schema()
+            .get_field_idx(&self.build_join_attribute);
+        let probejattr = self
+            .probe
+            .virtual_schema()
+            .get_field_idx(&self.probe_join_attribute);
+
         global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "hashjoin",
-            buildjattr: self.build_join_attribute,
-            probejattr: self.probe_join_attribute,
+            buildjattr: buildjattr,
+            probejattr: probejattr,
             hash: {
                 fn: "modulo",
                 buckets: 10000,
@@ -134,10 +143,12 @@ impl OpFilter {
     fn preflight(&self, global: &mut object::Object) {
         self.input.preflight(global);
 
+        let field = self.vs.get_field_idx(&self.field);
+
         global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "filter",
             op: self.op.clone(),
-            field: self.field,
+            field: field,
             value: self.value.clone(),
         };
     }
