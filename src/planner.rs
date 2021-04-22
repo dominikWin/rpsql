@@ -6,6 +6,7 @@ use sqlparser::ast::*;
 
 use crate::metadata::*;
 use crate::ops::*;
+use crate::projection::*;
 use crate::selection::*;
 
 impl From<&[Ident]> for ColRef {
@@ -399,6 +400,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     };
     let selection = selection.normalized();
 
+    let projection: Projection = (&select.projection).into();
+
     let potential_equijoins = selection.potential_equijoins();
 
     let (op, equality_set) = plan_joins(&table_namespace, &potential_equijoins, meta);
@@ -406,6 +409,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     let mut root_op = op;
 
     root_op = selection.apply_filter_ops(root_op, &equality_set);
+    root_op = projection.apply_project_ops(root_op);
 
     root_op
 }

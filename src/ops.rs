@@ -12,6 +12,7 @@ pub enum Op {
     ScanOp(Box<OpScan>),
     JoinOp(Box<OpJoin>),
     FilterOp(Box<OpFilter>),
+    ProjectionOp(Box<OpProjection>),
 }
 
 impl Op {
@@ -20,6 +21,7 @@ impl Op {
             Op::ScanOp(op) => op.vs.clone(),
             Op::FilterOp(op) => op.vs.clone(),
             Op::JoinOp(op) => op.vs.clone(),
+            Op::ProjectionOp(op) => op.vs.clone(),
         }
     }
 }
@@ -50,6 +52,14 @@ pub struct OpFilter {
     pub op: String,
     pub field: u32,
     pub value: String,
+    pub vs: VirtualSchema,
+    pub cfg_name: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct OpProjection {
+    pub input: Op,
+    pub projection: Vec<ColRef>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }

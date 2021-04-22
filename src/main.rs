@@ -6,6 +6,8 @@ mod conf_writer;
 mod metadata;
 mod ops;
 mod planner;
+mod projection;
+mod selection;
 
 use conf_writer::plan_to_json;
 use metadata::*;

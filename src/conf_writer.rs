@@ -150,12 +150,49 @@ impl OpFilter {
     }
 }
 
+impl OpProjection {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.input.name_op(namespace);
+
+        if self.cfg_name.is_none() {
+            self.cfg_name = Option::Some(namespace.name_operator("project"));
+        }
+    }
+
+    fn preflight(&self, global: &mut object::Object) {
+        self.input.preflight(global);
+
+        let mut projection = Vec::<String>::new();
+        for col in &self.projection {
+            for (idx, vcol) in self.vs.columns.iter().enumerate() {
+                if col == vcol {
+                    projection.push(format!("${}", idx));
+                    break;
+                }
+            }
+        }
+
+        global[self.cfg_name.as_ref().unwrap()] = object! {
+            type: "projection",
+            projection: projection,
+        };
+    }
+
+    fn node(&self) -> JsonValue {
+        object! {
+            name: self.cfg_name.as_ref().unwrap().to_string(),
+            input: self.input.node(),
+        }
+    }
+}
+
 impl Op {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
         match self {
             Op::ScanOp(op) => op.name_op(namespace),
             Op::JoinOp(op) => op.name_op(namespace),
             Op::FilterOp(op) => op.name_op(namespace),
+            Op::ProjectionOp(op) => op.name_op(namespace),
         }
     }
 
@@ -164,6 +201,7 @@ impl Op {
             Op::ScanOp(op) => op.preflight(global),
             Op::JoinOp(op) => op.preflight(global),
             Op::FilterOp(op) => op.preflight(global),
+            Op::ProjectionOp(op) => op.preflight(global),
         }
     }
 
@@ -172,6 +210,7 @@ impl Op {
             Op::ScanOp(op) => op.node(),
             Op::JoinOp(op) => op.node(),
             Op::FilterOp(op) => op.node(),
+            Op::ProjectionOp(op) => op.node(),
         }
     }
 }
