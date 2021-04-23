@@ -1,5 +1,5 @@
 use crate::metadata::MetaType;
-use crate::planner::VirtualSchema;
+use crate::planner::{LocalSchema, VirtualSchema};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColRef {
@@ -24,6 +24,15 @@ impl Op {
             Op::ProjectionOp(op) => op.vs.clone(),
         }
     }
+
+    pub fn local_schema(&self) -> Option<LocalSchema> {
+        match self {
+            Op::ScanOp(op) => op.ls.clone(),
+            Op::FilterOp(op) => op.ls.clone(),
+            Op::JoinOp(op) => op.ls.clone(),
+            Op::ProjectionOp(op) => op.ls.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +41,7 @@ pub struct OpScan {
     pub filetype: String,
     pub tab_name: String,
     pub schema: Vec<MetaType>,
+    pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }
@@ -42,6 +52,7 @@ pub struct OpJoin {
     pub build_join_attribute: ColRef,
     pub probe: Op,
     pub probe_join_attribute: ColRef,
+    pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }
@@ -52,6 +63,7 @@ pub struct OpFilter {
     pub op: String,
     pub field: ColRef,
     pub value: String,
+    pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }
@@ -60,6 +72,7 @@ pub struct OpFilter {
 pub struct OpProjection {
     pub input: Op,
     pub projection: Vec<ColRef>,
+    pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
 }

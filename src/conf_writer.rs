@@ -90,21 +90,32 @@ impl OpJoin {
         self.build.preflight(global);
         self.probe.preflight(global);
 
+        let buildcols = self.build.local_schema().unwrap().columns;
+        let probecols = self.probe.local_schema().unwrap().columns;
+
         let mut projection = Vec::<String>::new();
-        for i in 0..self.build.virtual_schema().columns.len() {
-            projection.push(format!("B${}", i));
-        }
-        for i in 0..self.probe.virtual_schema().columns.len() {
-            projection.push(format!("P${}", i));
+        for colref in &self.ls.as_ref().unwrap().columns {
+            for i in 0..buildcols.len() {
+                if &buildcols[i] == colref {
+                    projection.push(format!("B${}", i));
+                }
+            }
+            for i in 0..probecols.len() {
+                if &probecols[i] == colref {
+                    projection.push(format!("P${}", i));
+                }
+            }
         }
 
         let buildjattr = self
             .build
-            .virtual_schema()
+            .local_schema()
+            .unwrap()
             .get_field_idx(&self.build_join_attribute);
         let probejattr = self
             .probe
-            .virtual_schema()
+            .local_schema()
+            .unwrap()
             .get_field_idx(&self.probe_join_attribute);
 
         global[self.cfg_name.as_ref().unwrap()] = object! {
@@ -143,7 +154,7 @@ impl OpFilter {
     fn preflight(&self, global: &mut object::Object) {
         self.input.preflight(global);
 
-        let field = self.vs.get_field_idx(&self.field);
+        let field = self.ls.as_ref().unwrap().get_field_idx(&self.field);
 
         global[self.cfg_name.as_ref().unwrap()] = object! {
             type: "filter",

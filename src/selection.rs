@@ -61,11 +61,13 @@ impl Selection {
     pub fn apply_filter_ops(&self, mut op: Op, existing_equalities: &EqualityFactSet) -> Op {
         fn _compose_binary_filter(bin_op: &str, op: Op, colref: &ColRef, rep: &str) -> Op {
             let vs = op.virtual_schema();
+            let ls = op.local_schema();
             Op::FilterOp(Box::new(OpFilter {
                 field: colref.clone(),
                 input: op,
                 op: bin_op.to_string(),
                 value: rep.to_string(),
+                ls,
                 vs,
                 cfg_name: Option::None,
             }))

@@ -6,7 +6,7 @@ use sqlparser::ast::*;
 
 use crate::metadata::*;
 use crate::ops::*;
-use crate::optimizer::*;
+use crate::optimizer;
 use crate::projection::*;
 use crate::selection::*;
 
@@ -29,19 +29,6 @@ pub struct VirtualSchema {
 }
 
 impl VirtualSchema {
-    pub fn get_field_idx(&self, colref: &ColRef) -> u32 {
-        for i in 0..self.columns.len() {
-            if colref == &self.columns[i] {
-                return i as u32;
-            }
-        }
-
-        panic!(
-            "Failed to find column reference {:?} in local schema.",
-            colref
-        )
-    }
-
     pub fn contains(&self, colref: &ColRef) -> bool {
         self.columns.contains(colref)
     }
@@ -64,6 +51,26 @@ impl VirtualSchema {
         columns.append(&mut schema2.columns.clone());
 
         VirtualSchema { columns }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalSchema {
+    pub columns: Vec<ColRef>,
+}
+
+impl LocalSchema {
+    pub fn get_field_idx(&self, colref: &ColRef) -> u32 {
+        for i in 0..self.columns.len() {
+            if colref == &self.columns[i] {
+                return i as u32;
+            }
+        }
+
+        panic!(
+            "Failed to find column reference {:?} in local schema.",
+            colref
+        )
     }
 }
 
@@ -144,6 +151,7 @@ fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
         file: table_meta.file.to_string(),
         filetype: table_meta.filetype.to_string(),
         schema: table_meta.schema.columns.iter().map(|c| c.1).collect(),
+        ls: Option::None,
         vs: VirtualSchema::from_meta_table(table_meta, alias),
         cfg_name: Option::None,
     }
@@ -315,6 +323,7 @@ fn plan_joins(
             probe_join_attribute: next_cref.clone(),
             build: build_op,
             build_join_attribute: start_cref.clone(),
+            ls: Option::None,
             vs,
             cfg_name: Option::None,
         }))
@@ -380,9 +389,10 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     let mut root_op = op;
 
     root_op = selection.apply_filter_ops(root_op, &equality_set);
-    root_op = projection.apply_project_ops(root_op);
+    root_op = optimizer::pushdown_filters(root_op);
 
-    root_op = pushdown_filters(root_op);
+    let output_projection = projection.needed_projection();
+    root_op = optimizer::local_project(root_op, &output_projection);
 
     root_op
 }
