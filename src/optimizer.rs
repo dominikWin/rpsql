@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::iter::FromIterator;
+
 use crate::ops::*;
 use crate::planner::LocalSchema;
 
@@ -80,10 +83,17 @@ pub fn pushdown_filters(op: Op) -> Op {
     }
 }
 
-fn _coerce_projection(op: Op, target_projection: &[ColRef]) -> Op {
+fn _coerce_projection(op: Op, target_projection: &[ColRef], force_order: bool) -> Op {
     let op_projection = op.local_schema().unwrap().columns;
 
-    if target_projection.to_vec() == op_projection {
+    if !force_order {
+        // Only enforce ordering if we need to
+        if HashSet::<&ColRef>::from_iter(target_projection.iter())
+            == HashSet::<&ColRef>::from_iter(op_projection.iter())
+        {
+            return op;
+        }
+    } else if target_projection.to_vec() == op_projection {
         return op;
     }
 
@@ -99,7 +109,7 @@ fn _coerce_projection(op: Op, target_projection: &[ColRef]) -> Op {
     }))
 }
 
-pub fn local_project(op: Op, target_projection: &[ColRef]) -> Op {
+pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) -> Op {
     /*
      * On the head identify the requirements needed by the sub-ops.
      * On the tail construct a local schema and apply a projection if nessesary.
@@ -116,7 +126,7 @@ pub fn local_project(op: Op, target_projection: &[ColRef]) -> Op {
                 columns: op.vs.columns.clone(),
             });
 
-            _coerce_projection(Op::ScanOp(op), target_projection)
+            _coerce_projection(Op::ScanOp(op), target_projection, force_order)
         }
         Op::JoinOp(mut op) => {
             let mut requirements = target_projection.to_vec();
@@ -139,8 +149,9 @@ pub fn local_project(op: Op, target_projection: &[ColRef]) -> Op {
                 }
             }
 
-            op.build = local_project(op.build, &buildreqs);
-            op.probe = local_project(op.probe, &probereqs);
+            // Order matters only in build case
+            op.build = local_project(op.build, &buildreqs, true);
+            op.probe = local_project(op.probe, &probereqs, false);
 
             // Joins have a built-in project operator
             // They target the local schema
@@ -157,16 +168,16 @@ pub fn local_project(op: Op, target_projection: &[ColRef]) -> Op {
                 requirements.push(op.field.clone());
             }
 
-            op.input = local_project(op.input, &requirements);
+            op.input = local_project(op.input, &requirements, false);
 
             op.ls = op.input.local_schema();
 
-            _coerce_projection(Op::FilterOp(op), target_projection)
+            _coerce_projection(Op::FilterOp(op), target_projection, force_order)
         }
         Op::ProjectionOp(mut op) => {
-            op.input = local_project(op.input, target_projection);
+            op.input = local_project(op.input, target_projection, false);
 
-            _coerce_projection(op.input, target_projection)
+            _coerce_projection(op.input, target_projection, force_order)
         }
     };
 

@@ -392,7 +392,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     root_op = optimizer::pushdown_filters(root_op);
 
     let output_projection = projection.needed_projection();
-    root_op = optimizer::local_project(root_op, &output_projection);
+    root_op = optimizer::local_project(root_op, &output_projection, true);
 
     root_op
 }
