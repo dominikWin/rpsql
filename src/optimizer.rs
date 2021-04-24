@@ -120,12 +120,12 @@ pub fn local_project(op: Op, target_projection: &[ColRef]) -> Op {
         }
         Op::JoinOp(mut op) => {
             let mut requirements = target_projection.to_vec();
-            if !requirements.contains(&op.build_join_attribute) {
-                requirements.push(op.build_join_attribute.clone());
-            }
-            if !requirements.contains(&op.probe_join_attribute) {
-                requirements.push(op.probe_join_attribute.clone());
-            }
+
+            // Add the build and probe requirements and makre sure they're at the beginning
+            requirements.retain(|c| c != &op.build_join_attribute);
+            requirements.retain(|c| c != &op.probe_join_attribute);
+            requirements.insert(0, op.probe_join_attribute.clone());
+            requirements.insert(0, op.build_join_attribute.clone());
 
             let mut buildreqs = Vec::new();
             let mut probereqs = Vec::new();
