@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use sqlparser::ast::*;
 
+use crate::agg_grouping::*;
 use crate::metadata::*;
 use crate::ops::*;
 use crate::optimizer;
@@ -16,7 +17,7 @@ impl From<&[Ident]> for ColRef {
             panic!("You need to have both a table and col name")
         }
 
-        ColRef {
+        ColRef::TableRef {
             table: idents[0].to_string(),
             column: idents[1].to_string(),
         }
@@ -37,12 +38,16 @@ impl VirtualSchema {
         let mut columns = Vec::new();
 
         for column in &meta_schema.schema.columns {
-            columns.push(ColRef {
+            columns.push(ColRef::TableRef {
                 table: table_alias.to_string(),
                 column: column.0.clone(),
             })
         }
 
+        VirtualSchema { columns }
+    }
+
+    pub fn from_custom(columns: Vec<ColRef>) -> VirtualSchema {
         VirtualSchema { columns }
     }
 
@@ -198,12 +203,17 @@ fn plan_joins(
     }
 
     fn _find_vertex(v: &HashSet<Rc<Vertex>>, colref: &ColRef) -> Rc<Vertex> {
+        let table_ref_name = match colref {
+            ColRef::TableRef { table, column: _ } => table,
+            _ => panic!("Join column refs must be table refs"),
+        };
+
         for test_vertex in v {
-            if test_vertex.alias == colref.table {
+            if &test_vertex.alias == table_ref_name {
                 return Rc::clone(test_vertex);
             }
         }
-        panic!("Failed to resolve table {}", colref.table);
+        panic!("Failed to resolve table {:?}", colref);
     }
 
     let mut e = HashSet::<Rc<Edge>>::new();
@@ -382,6 +392,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     let projection: Projection = (&select.projection).into();
 
+    let agg_grouping = AggGrouping::from_query(&select, &projection);
+
     let potential_equijoins = selection.potential_equijoins();
 
     let (op, equality_set) = plan_joins(&table_namespace, &potential_equijoins, meta);
@@ -390,6 +402,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     root_op = selection.apply_filter_ops(root_op, &equality_set);
     root_op = optimizer::pushdown_filters(root_op);
+
+    root_op = agg_grouping.apply_agg_grouping_ops(root_op);
 
     let output_projection = projection.needed_projection();
     root_op = optimizer::local_project(root_op, &output_projection, true);

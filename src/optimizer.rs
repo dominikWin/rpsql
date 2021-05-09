@@ -18,6 +18,9 @@ pub fn pushdown_filters(op: Op) -> Op {
             match &op_filter.input {
                 Op::ScanOp(_) => Op::FilterOp(op_filter),
                 Op::FilterOp(_) => Op::FilterOp(op_filter),
+                Op::AggGroupOp(_) => {
+                    panic!("Can't pushdown filters below agg group (depending on HAVING clause)")
+                }
                 Op::JoinOp(sub_op) => {
                     if sub_op.build.virtual_schema().contains(&op_filter.field) {
                         Op::JoinOp(Box::new(OpJoin {
@@ -79,6 +82,10 @@ pub fn pushdown_filters(op: Op) -> Op {
         Op::ProjectionOp(mut op_project) => {
             op_project.input = pushdown_filters(op_project.input);
             Op::ProjectionOp(op_project)
+        }
+        Op::AggGroupOp(mut op_agg_group) => {
+            op_agg_group.input = pushdown_filters(op_agg_group.input);
+            Op::AggGroupOp(op_agg_group)
         }
     }
 }
@@ -178,6 +185,24 @@ pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) ->
             op.input = local_project(op.input, target_projection, false);
 
             _coerce_projection(op.input, target_projection, force_order)
+        }
+        Op::AggGroupOp(mut op) => {
+            let mut requirements = op.grouping.clone();
+
+            match &op.agg_field {
+                ColRef::AggregateRef { func: _, source } => {
+                    requirements.push(source.as_ref().clone());
+                }
+                _ => panic!("Agg field must be aggregate type"),
+            }
+
+            let mut ls = op.grouping.clone();
+            ls.push(op.agg_field.clone());
+            op.ls = Option::Some(LocalSchema { columns: ls });
+
+            op.input = local_project(op.input, &requirements, true);
+
+            _coerce_projection(Op::AggGroupOp(op), target_projection, force_order)
         }
     };
 

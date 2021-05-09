@@ -2,9 +2,23 @@ use crate::metadata::MetaType;
 use crate::planner::{LocalSchema, VirtualSchema};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ColRef {
-    pub table: String,
-    pub column: String,
+pub enum ColRef {
+    TableRef { table: String, column: String },
+    AggregateRef { func: AggFunc, source: Box<ColRef> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AggFunc {
+    Sum,
+}
+
+impl AggFunc {
+    pub fn as_agg_func(name: &str) -> Option<AggFunc> {
+        match name.to_lowercase().as_ref() {
+            "sum" => Option::Some(AggFunc::Sum),
+            _ => Option::None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -13,6 +27,7 @@ pub enum Op {
     JoinOp(Box<OpJoin>),
     FilterOp(Box<OpFilter>),
     ProjectionOp(Box<OpProjection>),
+    AggGroupOp(Box<OpAggGroup>),
 }
 
 impl Op {
@@ -22,6 +37,7 @@ impl Op {
             Op::FilterOp(op) => op.vs.clone(),
             Op::JoinOp(op) => op.vs.clone(),
             Op::ProjectionOp(op) => op.vs.clone(),
+            Op::AggGroupOp(op) => op.vs.clone(),
         }
     }
 
@@ -31,6 +47,7 @@ impl Op {
             Op::FilterOp(op) => op.ls.clone(),
             Op::JoinOp(op) => op.ls.clone(),
             Op::ProjectionOp(op) => op.ls.clone(),
+            Op::AggGroupOp(op) => op.ls.clone(),
         }
     }
 }
@@ -72,6 +89,16 @@ pub struct OpFilter {
 pub struct OpProjection {
     pub input: Op,
     pub projection: Vec<ColRef>,
+    pub ls: Option<LocalSchema>,
+    pub vs: VirtualSchema,
+    pub cfg_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpAggGroup {
+    pub input: Op,
+    pub grouping: Vec<ColRef>,
+    pub agg_field: ColRef,
     pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,

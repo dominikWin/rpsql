@@ -4,25 +4,37 @@ use crate::ops::*;
 
 #[derive(Debug)]
 pub struct Projection {
-    items: Vec<ColRef>,
+    pub items: Vec<ColRef>,
+}
+
+fn _convert_expr(expr: &Expr) -> ColRef {
+    match expr {
+        Expr::CompoundIdentifier(idents) => idents.as_slice().into(),
+        Expr::Identifier(_) => panic!("Identifiers must be fully qualified!"),
+        Expr::Function(function) => {
+            assert!(function.name.0.len() == 1);
+            let name = &function.name.0[0].value;
+
+            assert!(function.args.len() == 1);
+            let arg = &function.args[0];
+            let arg = match arg {
+                FunctionArg::Named { name: _, arg: _ } => panic!("Named arguments not supported!"),
+                FunctionArg::Unnamed(expr) => _convert_expr(&expr),
+            };
+
+            ColRef::AggregateRef {
+                func: AggFunc::as_agg_func(name).unwrap(),
+                source: Box::new(arg),
+            }
+        }
+        _ => panic!("Projection must be an identifier."),
+    }
 }
 
 fn _convert_item(item: &SelectItem) -> ColRef {
     match item {
-        SelectItem::UnnamedExpr(expr) => {
-            if let Expr::CompoundIdentifier(idents) = expr {
-                idents.as_slice().into()
-            } else {
-                panic!("Projection must be an identifier.")
-            }
-        }
-        SelectItem::ExprWithAlias { expr, alias: _ } => {
-            if let Expr::CompoundIdentifier(idents) = expr {
-                idents.as_slice().into()
-            } else {
-                panic!("Projection must be an identifier.")
-            }
-        }
+        SelectItem::UnnamedExpr(expr) => _convert_expr(expr),
+        SelectItem::ExprWithAlias { expr, alias: _ } => _convert_expr(expr),
         SelectItem::QualifiedWildcard(_) => panic!("Wildcards are not supported"),
         SelectItem::Wildcard => panic!("Wildcards are not supported"),
     }

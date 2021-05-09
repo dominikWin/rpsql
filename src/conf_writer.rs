@@ -208,6 +208,46 @@ impl OpProjection {
     }
 }
 
+impl OpAggGroup {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.input.name_op(namespace);
+
+        if self.cfg_name.is_none() {
+            self.cfg_name = Option::Some(namespace.name_operator("agg"));
+        }
+    }
+
+    fn preflight(&self, global: &mut object::Object) {
+        self.input.preflight(global);
+
+        let mut fields = Vec::new();
+        for group_field in &self.grouping {
+            fields.push(self.ls.as_ref().unwrap().get_field_idx(group_field));
+        }
+
+        let sumfield_idx = self.ls.as_ref().unwrap().get_field_idx(&self.agg_field);
+        let hashfield_idx = fields[0];
+
+        global[self.cfg_name.as_ref().unwrap()] = object! {
+            type: "aggregate_sum",
+            fields_tuple: fields,
+            sumfield: sumfield_idx,
+            hash: {
+                fn: "modulo",
+                buckets: 10000,
+                field: hashfield_idx,
+            },
+        };
+    }
+
+    fn node(&self) -> JsonValue {
+        object! {
+            name: self.cfg_name.as_ref().unwrap().to_string(),
+            input: self.input.node(),
+        }
+    }
+}
+
 impl Op {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
         match self {
@@ -215,6 +255,7 @@ impl Op {
             Op::JoinOp(op) => op.name_op(namespace),
             Op::FilterOp(op) => op.name_op(namespace),
             Op::ProjectionOp(op) => op.name_op(namespace),
+            Op::AggGroupOp(op) => op.name_op(namespace),
         }
     }
 
@@ -224,6 +265,7 @@ impl Op {
             Op::JoinOp(op) => op.preflight(global),
             Op::FilterOp(op) => op.preflight(global),
             Op::ProjectionOp(op) => op.preflight(global),
+            Op::AggGroupOp(op) => op.preflight(global),
         }
     }
 
@@ -233,6 +275,7 @@ impl Op {
             Op::JoinOp(op) => op.node(),
             Op::FilterOp(op) => op.node(),
             Op::ProjectionOp(op) => op.node(),
+            Op::AggGroupOp(op) => op.node(),
         }
     }
 }
