@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::iter::FromIterator;
 
 use crate::ops::*;
 use crate::planner::LocalSchema;
@@ -116,8 +115,8 @@ fn _coerce_projection(op: Op, target_projection: &[ColRef], force_order: bool) -
 
     if !force_order {
         // Only enforce ordering if we need to
-        if HashSet::<&ColRef>::from_iter(target_projection.iter())
-            == HashSet::<&ColRef>::from_iter(op_projection.iter())
+        if target_projection.iter().collect::<HashSet::<&ColRef>>()
+            == op_projection.iter().collect::<HashSet::<&ColRef>>()
         {
             return op;
         }

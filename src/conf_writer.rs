@@ -95,13 +95,13 @@ impl OpJoin {
 
         let mut projection = Vec::<String>::new();
         for colref in &self.ls.as_ref().unwrap().columns {
-            for i in 0..buildcols.len() {
-                if &buildcols[i] == colref {
+            for (i, item) in buildcols.iter().enumerate() {
+                if item == colref {
                     projection.push(format!("B${}", i));
                 }
             }
-            for i in 0..probecols.len() {
-                if &probecols[i] == colref {
+            for (i, item) in probecols.iter().enumerate() {
+                if item == colref {
                     projection.push(format!("P${}", i));
                 }
             }
@@ -266,10 +266,8 @@ impl OpSortLimit {
         }
 
         let mut asc = 1;
-        if self.order.is_some() {
-            if self.order.as_ref().unwrap() == &Order::DESC {
-                asc = 0;
-            }
+        if self.order.is_some() && self.order.as_ref().unwrap() == &Order::DESC {
+            asc = 0;
         }
 
         global[self.cfg_name.as_ref().unwrap()] = object! {

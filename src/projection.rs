@@ -23,7 +23,7 @@ pub fn convert_expr(expr: &Expr) -> ColRef {
             };
 
             ColRef::AggregateRef {
-                func: AggFunc::as_agg_func(name).unwrap(),
+                func: AggFunc::parse_agg_func(name).unwrap(),
                 source: Box::new(arg),
             }
         }

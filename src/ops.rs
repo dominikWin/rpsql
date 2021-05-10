@@ -13,7 +13,7 @@ pub enum AggFunc {
 }
 
 impl AggFunc {
-    pub fn as_agg_func(name: &str) -> Option<AggFunc> {
+    pub fn parse_agg_func(name: &str) -> Option<AggFunc> {
         match name.to_lowercase().as_ref() {
             "sum" => Option::Some(AggFunc::Sum),
             _ => Option::None,

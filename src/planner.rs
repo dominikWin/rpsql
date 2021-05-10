@@ -395,7 +395,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     let agg_grouping = AggGrouping::from_query(&select, &projection);
 
-    let sort_limit: SortLimit = (query).into();
+    let sort_limit: SortLimit = query.into();
 
     let potential_equijoins = selection.potential_equijoins();
 
