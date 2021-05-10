@@ -115,8 +115,8 @@ fn _coerce_projection(op: Op, target_projection: &[ColRef], force_order: bool) -
 
     if !force_order {
         // Only enforce ordering if we need to
-        if target_projection.iter().collect::<HashSet::<&ColRef>>()
-            == op_projection.iter().collect::<HashSet::<&ColRef>>()
+        if target_projection.iter().collect::<HashSet<&ColRef>>()
+            == op_projection.iter().collect::<HashSet<&ColRef>>()
         {
             return op;
         }

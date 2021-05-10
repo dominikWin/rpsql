@@ -10,12 +10,14 @@ pub enum ColRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AggFunc {
     Sum,
+    Count,
 }
 
 impl AggFunc {
     pub fn parse_agg_func(name: &str) -> Option<AggFunc> {
         match name.to_lowercase().as_ref() {
             "sum" => Option::Some(AggFunc::Sum),
+            "count" => Option::Some(AggFunc::Count),
             _ => Option::None,
         }
     }

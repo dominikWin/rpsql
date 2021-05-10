@@ -228,15 +228,35 @@ impl OpAggGroup {
         let sumfield_idx = self.ls.as_ref().unwrap().get_field_idx(&self.agg_field);
         let hashfield_idx = fields[0];
 
-        global[self.cfg_name.as_ref().unwrap()] = object! {
-            type: "aggregate_sum",
-            fields_tuple: fields,
-            sumfield: sumfield_idx,
-            hash: {
-                fn: "modulo",
-                buckets: 10000,
-                field: hashfield_idx,
-            },
+        let func = match self.agg_field {
+            ColRef::AggregateRef { func, source: _ } => func,
+            _ => unreachable!(),
+        };
+
+        global[self.cfg_name.as_ref().unwrap()] = match func {
+            AggFunc::Sum => {
+                object! {
+                    type: "aggregate_sum",
+                    fields_tuple: fields,
+                    sumfield: sumfield_idx,
+                    hash: {
+                        fn: "modulo",
+                        buckets: 10000,
+                        field: hashfield_idx,
+                    },
+                }
+            }
+            AggFunc::Count => {
+                object! {
+                    type: "aggregate_count",
+                    fields_tuple: fields,
+                    hash: {
+                        fn: "modulo",
+                        buckets: 10000,
+                        field: hashfield_idx,
+                    },
+                }
+            }
         };
     }
 
