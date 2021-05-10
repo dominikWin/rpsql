@@ -28,6 +28,7 @@ pub enum Op {
     FilterOp(Box<OpFilter>),
     ProjectionOp(Box<OpProjection>),
     AggGroupOp(Box<OpAggGroup>),
+    SortLimitOp(Box<OpSortLimit>),
 }
 
 impl Op {
@@ -38,6 +39,7 @@ impl Op {
             Op::JoinOp(op) => op.vs.clone(),
             Op::ProjectionOp(op) => op.vs.clone(),
             Op::AggGroupOp(op) => op.vs.clone(),
+            Op::SortLimitOp(op) => op.vs.clone(),
         }
     }
 
@@ -48,6 +50,7 @@ impl Op {
             Op::JoinOp(op) => op.ls.clone(),
             Op::ProjectionOp(op) => op.ls.clone(),
             Op::AggGroupOp(op) => op.ls.clone(),
+            Op::SortLimitOp(op) => op.ls.clone(),
         }
     }
 }
@@ -99,6 +102,23 @@ pub struct OpAggGroup {
     pub input: Op,
     pub grouping: Vec<ColRef>,
     pub agg_field: ColRef,
+    pub ls: Option<LocalSchema>,
+    pub vs: VirtualSchema,
+    pub cfg_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Order {
+    ASC,
+    DESC,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpSortLimit {
+    pub input: Op,
+    pub order_columns: Vec<ColRef>,
+    pub order: Option<Order>,
+    pub limit: u64,
     pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,

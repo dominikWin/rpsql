@@ -10,6 +10,7 @@ mod optimizer;
 mod planner;
 mod projection;
 mod selection;
+mod sort_limit;
 
 use conf_writer::plan_to_json;
 use metadata::*;

@@ -10,6 +10,7 @@ use crate::ops::*;
 use crate::optimizer;
 use crate::projection::*;
 use crate::selection::*;
+use crate::sort_limit::*;
 
 impl From<&[Ident]> for ColRef {
     fn from(idents: &[Ident]) -> ColRef {
@@ -394,6 +395,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     let agg_grouping = AggGrouping::from_query(&select, &projection);
 
+    let sort_limit: SortLimit = (query).into();
+
     let potential_equijoins = selection.potential_equijoins();
 
     let (op, equality_set) = plan_joins(&table_namespace, &potential_equijoins, meta);
@@ -404,6 +407,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     root_op = optimizer::pushdown_filters(root_op);
 
     root_op = agg_grouping.apply_agg_grouping_ops(root_op);
+    root_op = sort_limit.apply_sort_limit_ops(root_op);
 
     let output_projection = projection.needed_projection();
     root_op = optimizer::local_project(root_op, &output_projection, true);

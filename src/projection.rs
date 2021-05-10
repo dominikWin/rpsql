@@ -7,7 +7,7 @@ pub struct Projection {
     pub items: Vec<ColRef>,
 }
 
-fn _convert_expr(expr: &Expr) -> ColRef {
+pub fn convert_expr(expr: &Expr) -> ColRef {
     match expr {
         Expr::CompoundIdentifier(idents) => idents.as_slice().into(),
         Expr::Identifier(_) => panic!("Identifiers must be fully qualified!"),
@@ -19,7 +19,7 @@ fn _convert_expr(expr: &Expr) -> ColRef {
             let arg = &function.args[0];
             let arg = match arg {
                 FunctionArg::Named { name: _, arg: _ } => panic!("Named arguments not supported!"),
-                FunctionArg::Unnamed(expr) => _convert_expr(&expr),
+                FunctionArg::Unnamed(expr) => convert_expr(&expr),
             };
 
             ColRef::AggregateRef {
@@ -33,8 +33,8 @@ fn _convert_expr(expr: &Expr) -> ColRef {
 
 fn _convert_item(item: &SelectItem) -> ColRef {
     match item {
-        SelectItem::UnnamedExpr(expr) => _convert_expr(expr),
-        SelectItem::ExprWithAlias { expr, alias: _ } => _convert_expr(expr),
+        SelectItem::UnnamedExpr(expr) => convert_expr(expr),
+        SelectItem::ExprWithAlias { expr, alias: _ } => convert_expr(expr),
         SelectItem::QualifiedWildcard(_) => panic!("Wildcards are not supported"),
         SelectItem::Wildcard => panic!("Wildcards are not supported"),
     }

@@ -77,6 +77,23 @@ pub fn pushdown_filters(op: Op) -> Op {
                     vs: sub_op.vs.clone(),
                     cfg_name: sub_op.cfg_name.clone(),
                 })),
+                Op::SortLimitOp(sub_op) => Op::SortLimitOp(Box::new(OpSortLimit {
+                    input: Op::FilterOp(Box::new(OpFilter {
+                        input: sub_op.input.clone(),
+                        op: op_filter.op,
+                        field: op_filter.field,
+                        value: op_filter.value,
+                        ls: sub_op.input.local_schema(),
+                        vs: sub_op.input.virtual_schema(),
+                        cfg_name: op_filter.cfg_name,
+                    })),
+                    order_columns: sub_op.order_columns.clone(),
+                    order: sub_op.order.clone(),
+                    limit: sub_op.limit,
+                    ls: sub_op.ls.clone(),
+                    vs: sub_op.vs.clone(),
+                    cfg_name: sub_op.cfg_name.clone(),
+                })),
             }
         }
         Op::ProjectionOp(mut op_project) => {
@@ -86,6 +103,10 @@ pub fn pushdown_filters(op: Op) -> Op {
         Op::AggGroupOp(mut op_agg_group) => {
             op_agg_group.input = pushdown_filters(op_agg_group.input);
             Op::AggGroupOp(op_agg_group)
+        }
+        Op::SortLimitOp(mut op_sort_limit) => {
+            op_sort_limit.input = pushdown_filters(op_sort_limit.input);
+            Op::SortLimitOp(op_sort_limit)
         }
     }
 }
@@ -203,6 +224,15 @@ pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) ->
             op.input = local_project(op.input, &requirements, true);
 
             _coerce_projection(Op::AggGroupOp(op), target_projection, force_order)
+        }
+        Op::SortLimitOp(mut op) => {
+            let mut requirements = op.order_columns.clone();
+            requirements.extend_from_slice(target_projection);
+
+            op.input = local_project(op.input, &requirements, false);
+            op.ls = op.input.local_schema();
+
+            _coerce_projection(Op::SortLimitOp(op), target_projection, force_order)
         }
     };
 

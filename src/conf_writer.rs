@@ -248,6 +248,46 @@ impl OpAggGroup {
     }
 }
 
+impl OpSortLimit {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.input.name_op(namespace);
+
+        if self.cfg_name.is_none() {
+            self.cfg_name = Option::Some(namespace.name_operator("sortlimit"));
+        }
+    }
+
+    fn preflight(&self, global: &mut object::Object) {
+        self.input.preflight(global);
+
+        let mut order_columns = Vec::new();
+        for col in &self.order_columns {
+            order_columns.push(format!("${}", self.ls.as_ref().unwrap().get_field_idx(col)));
+        }
+
+        let mut asc = 1;
+        if self.order.is_some() {
+            if self.order.as_ref().unwrap() == &Order::DESC {
+                asc = 0;
+            }
+        }
+
+        global[self.cfg_name.as_ref().unwrap()] = object! {
+            type: "sortlimit",
+            by: order_columns,
+            asc_tuple: [asc],
+            limit_tuple: [self.limit]
+        };
+    }
+
+    fn node(&self) -> JsonValue {
+        object! {
+            name: self.cfg_name.as_ref().unwrap().to_string(),
+            input: self.input.node(),
+        }
+    }
+}
+
 impl Op {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
         match self {
@@ -256,6 +296,7 @@ impl Op {
             Op::FilterOp(op) => op.name_op(namespace),
             Op::ProjectionOp(op) => op.name_op(namespace),
             Op::AggGroupOp(op) => op.name_op(namespace),
+            Op::SortLimitOp(op) => op.name_op(namespace),
         }
     }
 
@@ -266,6 +307,7 @@ impl Op {
             Op::FilterOp(op) => op.preflight(global),
             Op::ProjectionOp(op) => op.preflight(global),
             Op::AggGroupOp(op) => op.preflight(global),
+            Op::SortLimitOp(op) => op.preflight(global),
         }
     }
 
@@ -276,6 +318,7 @@ impl Op {
             Op::FilterOp(op) => op.node(),
             Op::ProjectionOp(op) => op.node(),
             Op::AggGroupOp(op) => op.node(),
+            Op::SortLimitOp(op) => op.node(),
         }
     }
 }
