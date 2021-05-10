@@ -370,7 +370,7 @@ fn plan_joins(
     )
 }
 
-fn _correct_subquery_schema(op: Op, alias: &str) -> Op {
+fn _correct_subquery_schema(op: Op, table_alias: &str, column_names: &[String]) -> Op {
     let n_cols = op
         .local_schema()
         .expect("Subquery must have a local schema plan")
@@ -378,10 +378,10 @@ fn _correct_subquery_schema(op: Op, alias: &str) -> Op {
         .len();
 
     let mut upper_schema = Vec::<ColRef>::with_capacity(n_cols);
-    for i in 0..n_cols {
+    for col_name in column_names {
         upper_schema.push(ColRef::TableRef {
-            table: alias.to_string(),
-            column: format!("_{}", i),
+            table: table_alias.to_string(),
+            column: col_name.clone(),
         });
     }
 
@@ -395,7 +395,7 @@ fn _correct_subquery_schema(op: Op, alias: &str) -> Op {
     Op::SubqueryProjOp(Box::new(OpSubqueryProj { input: op, vs, ls }))
 }
 
-pub fn plan(query: &Query, meta: &Metadata) -> Op {
+pub fn plan(query: &Query, meta: &Metadata) -> (Op, Vec<String>) {
     let setexpr = &query.body;
     let select = match setexpr {
         SetExpr::Select(select) => select,
@@ -436,8 +436,8 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
                 .value
                 .to_string();
 
-            let mut op = plan(subquery, meta);
-            op = _correct_subquery_schema(op, &alias);
+            let (mut op, subquery_column_aliases) = plan(subquery, meta);
+            op = _correct_subquery_schema(op, &alias, &subquery_column_aliases);
 
             table_namespace.insert(alias, TableSource::Subquery(op));
         } else {
@@ -473,5 +473,5 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
     let output_projection = projection.needed_projection();
     root_op = optimizer::local_project(root_op, &output_projection, true);
 
-    root_op
+    (root_op, projection.needed_projection_aliases())
 }

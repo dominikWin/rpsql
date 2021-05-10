@@ -36,6 +36,6 @@ fn main() {
         _ => panic!("Not a query"),
     };
 
-    let exec_plan = plan(&query, &meta);
+    let (exec_plan, _col_names) = plan(&query, &meta);
     println!("{}", plan_to_json(exec_plan, &meta));
 }

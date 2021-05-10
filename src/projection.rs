@@ -5,6 +5,7 @@ use crate::ops::*;
 #[derive(Debug)]
 pub struct Projection {
     pub items: Vec<ColRef>,
+    pub aliases: Vec<String>,
 }
 
 pub fn convert_expr(expr: &Expr) -> ColRef {
@@ -31,10 +32,12 @@ pub fn convert_expr(expr: &Expr) -> ColRef {
     }
 }
 
-fn _convert_item(item: &SelectItem) -> ColRef {
+fn _convert_item(item: &SelectItem) -> (ColRef, Option<String>) {
     match item {
-        SelectItem::UnnamedExpr(expr) => convert_expr(expr),
-        SelectItem::ExprWithAlias { expr, alias: _ } => convert_expr(expr),
+        SelectItem::UnnamedExpr(expr) => (convert_expr(expr), Option::None),
+        SelectItem::ExprWithAlias { expr, alias } => {
+            (convert_expr(expr), Option::Some(alias.value.clone()))
+        }
         SelectItem::QualifiedWildcard(_) => panic!("Wildcards are not supported"),
         SelectItem::Wildcard => panic!("Wildcards are not supported"),
     }
@@ -43,13 +46,18 @@ fn _convert_item(item: &SelectItem) -> ColRef {
 impl From<&Vec<sqlparser::ast::SelectItem>> for Projection {
     fn from(items: &Vec<SelectItem>) -> Projection {
         let mut projection_items = Vec::with_capacity(items.len());
+        let mut projection_aliases = Vec::with_capacity(items.len());
 
-        for item in items {
-            projection_items.push(_convert_item(item));
+        for (i, item) in items.iter().enumerate() {
+            let (internal_item, alias_optional) = _convert_item(item);
+            let alias = alias_optional.unwrap_or(format!("_{}", i));
+            projection_items.push(internal_item);
+            projection_aliases.push(alias);
         }
 
         Projection {
             items: projection_items,
+            aliases: projection_aliases,
         }
     }
 }
@@ -57,5 +65,9 @@ impl From<&Vec<sqlparser::ast::SelectItem>> for Projection {
 impl Projection {
     pub fn needed_projection(&self) -> Vec<ColRef> {
         self.items.clone()
+    }
+
+    pub fn needed_projection_aliases(&self) -> Vec<String> {
+        self.aliases.clone()
     }
 }
