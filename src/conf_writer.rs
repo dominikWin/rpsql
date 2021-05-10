@@ -306,6 +306,20 @@ impl OpSortLimit {
     }
 }
 
+impl OpSubqueryProj {
+    fn name_op(&mut self, namespace: &mut ConfigNamespace) {
+        self.input.name_op(namespace);
+    }
+
+    fn preflight(&self, global: &mut object::Object) {
+        self.input.preflight(global);
+    }
+
+    fn node(&self) -> JsonValue {
+        self.input.node()
+    }
+}
+
 impl Op {
     fn name_op(&mut self, namespace: &mut ConfigNamespace) {
         match self {
@@ -315,6 +329,7 @@ impl Op {
             Op::ProjectionOp(op) => op.name_op(namespace),
             Op::AggGroupOp(op) => op.name_op(namespace),
             Op::SortLimitOp(op) => op.name_op(namespace),
+            Op::SubqueryProjOp(op) => op.name_op(namespace),
         }
     }
 
@@ -326,6 +341,7 @@ impl Op {
             Op::ProjectionOp(op) => op.preflight(global),
             Op::AggGroupOp(op) => op.preflight(global),
             Op::SortLimitOp(op) => op.preflight(global),
+            Op::SubqueryProjOp(op) => op.preflight(global),
         }
     }
 
@@ -337,6 +353,7 @@ impl Op {
             Op::ProjectionOp(op) => op.node(),
             Op::AggGroupOp(op) => op.node(),
             Op::SortLimitOp(op) => op.node(),
+            Op::SubqueryProjOp(op) => op.node(),
         }
     }
 }

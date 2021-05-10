@@ -31,6 +31,7 @@ pub enum Op {
     ProjectionOp(Box<OpProjection>),
     AggGroupOp(Box<OpAggGroup>),
     SortLimitOp(Box<OpSortLimit>),
+    SubqueryProjOp(Box<OpSubqueryProj>),
 }
 
 impl Op {
@@ -42,6 +43,7 @@ impl Op {
             Op::ProjectionOp(op) => op.vs.clone(),
             Op::AggGroupOp(op) => op.vs.clone(),
             Op::SortLimitOp(op) => op.vs.clone(),
+            Op::SubqueryProjOp(op) => op.vs.clone(),
         }
     }
 
@@ -53,6 +55,7 @@ impl Op {
             Op::ProjectionOp(op) => op.ls.clone(),
             Op::AggGroupOp(op) => op.ls.clone(),
             Op::SortLimitOp(op) => op.ls.clone(),
+            Op::SubqueryProjOp(op) => op.ls.clone(),
         }
     }
 }
@@ -124,4 +127,14 @@ pub struct OpSortLimit {
     pub ls: Option<LocalSchema>,
     pub vs: VirtualSchema,
     pub cfg_name: Option<String>,
+}
+
+/**
+ * Null op, the optimizer knows that the schemas are provided to it.
+ */
+#[derive(Debug, Clone)]
+pub struct OpSubqueryProj {
+    pub input: Op,
+    pub ls: Option<LocalSchema>,
+    pub vs: VirtualSchema,
 }

@@ -17,6 +17,7 @@ pub fn pushdown_filters(op: Op) -> Op {
             match &op_filter.input {
                 Op::ScanOp(_) => Op::FilterOp(op_filter),
                 Op::FilterOp(_) => Op::FilterOp(op_filter),
+                Op::SubqueryProjOp(_) => Op::FilterOp(op_filter),
                 Op::AggGroupOp(_) => {
                     panic!("Can't pushdown filters below agg group (depending on HAVING clause)")
                 }
@@ -107,6 +108,7 @@ pub fn pushdown_filters(op: Op) -> Op {
             op_sort_limit.input = pushdown_filters(op_sort_limit.input);
             Op::SortLimitOp(op_sort_limit)
         }
+        Op::SubqueryProjOp(op_subquery_proj) => Op::SubqueryProjOp(op_subquery_proj),
     }
 }
 
@@ -171,7 +173,13 @@ pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) ->
                 if op.build.virtual_schema().columns.contains(&req) {
                     buildreqs.push(req);
                 } else {
-                    debug_assert!(op.probe.virtual_schema().columns.contains(&req));
+                    if !op.probe.virtual_schema().columns.contains(&req) {
+                        panic!(
+                            "Failed to find requirement {:?} on probe side of join.",
+                            req
+                        )
+                    }
+
                     probereqs.push(req);
                 }
             }
@@ -232,6 +240,10 @@ pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) ->
             op.ls = op.input.local_schema();
 
             _coerce_projection(Op::SortLimitOp(op), target_projection, force_order)
+        }
+
+        Op::SubqueryProjOp(op) => {
+            _coerce_projection(Op::SubqueryProjOp(op), target_projection, force_order)
         }
     };
 

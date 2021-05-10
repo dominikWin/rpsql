@@ -136,6 +136,12 @@ impl EqualityFactSet {
     }
 }
 
+#[derive(Debug)]
+pub enum TableSource {
+    Direct(String),
+    Subquery(Op),
+}
+
 fn unwrap_table_name(parts: &[Ident]) -> String {
     if parts.len() != 1 {
         panic!("Invalid table name {:?}", parts);
@@ -164,13 +170,12 @@ fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
 }
 
 fn plan_joins(
-    from_namespace: &HashMap<String, String>,
+    from_namespace: &HashMap<String, TableSource>,
     potential_joins: &HashSet<(ColRef, ColRef)>,
     meta: &Metadata,
 ) -> (Op, EqualityFactSet) {
     #[derive(Hash, PartialEq, Eq, Debug)]
     struct Vertex {
-        table: String,
         alias: String,
     }
 
@@ -183,24 +188,28 @@ fn plan_joins(
     }
 
     let mut v = HashSet::<Rc<Vertex>>::new();
-    for (alias, table) in from_namespace.iter() {
+    for (alias, _table) in from_namespace.iter() {
         v.insert(Rc::new(Vertex {
-            table: table.to_string(),
             alias: alias.to_string(),
         }));
     }
 
     // Handle simple case first
     if v.len() == 1 {
-        let single_tab = v.iter().next().unwrap();
-        return (
-            Op::ScanOp(Box::new(make_scan(
-                &single_tab.table,
-                &single_tab.alias,
-                meta,
-            ))),
-            EqualityFactSet::new(),
-        );
+        let single_tab_vtx = v.iter().next().unwrap();
+        let single_tab = &from_namespace[&single_tab_vtx.alias];
+
+        return match single_tab {
+            TableSource::Direct(table_name) => (
+                Op::ScanOp(Box::new(make_scan(
+                    &table_name,
+                    &single_tab_vtx.alias,
+                    meta,
+                ))),
+                EqualityFactSet::new(),
+            ),
+            TableSource::Subquery(op) => (op.clone(), EqualityFactSet::new()),
+        };
     }
 
     fn _find_vertex(v: &HashSet<Rc<Vertex>>, colref: &ColRef) -> Rc<Vertex> {
@@ -290,7 +299,7 @@ fn plan_joins(
         start_vertex: &Rc<Vertex>,
         current_edge: &Rc<Edge>,
         future: &[Rc<Edge>],
-        table_namespace: &HashMap<String, String>,
+        table_namespace: &HashMap<String, TableSource>,
         meta: &Metadata,
     ) -> Op {
         let (start_cref, next_cref, next_vertex) = if start_vertex == &current_edge.left {
@@ -308,11 +317,16 @@ fn plan_joins(
         };
 
         let probe_op = if future.is_empty() {
-            Op::ScanOp(Box::new(make_scan(
-                &next_vertex.table,
-                &next_vertex.alias,
-                meta,
-            )))
+            let next_table = &table_namespace[&next_vertex.alias];
+
+            match next_table {
+                TableSource::Direct(next_table_name) => Op::ScanOp(Box::new(make_scan(
+                    &next_table_name,
+                    &next_vertex.alias,
+                    meta,
+                ))),
+                TableSource::Subquery(op) => op.clone(),
+            }
         } else {
             associate_join(
                 &next_vertex,
@@ -322,11 +336,16 @@ fn plan_joins(
                 meta,
             )
         };
-        let build_op = Op::ScanOp(Box::new(make_scan(
-            &start_vertex.table,
-            &start_vertex.alias,
-            meta,
-        )));
+
+        let start_table = &table_namespace[&start_vertex.alias];
+        let build_op = match start_table {
+            TableSource::Direct(start_table_name) => Op::ScanOp(Box::new(make_scan(
+                &start_table_name,
+                &start_vertex.alias,
+                meta,
+            ))),
+            TableSource::Subquery(op) => op.clone(),
+        };
 
         let vs = VirtualSchema::cat(&build_op.virtual_schema(), &probe_op.virtual_schema());
         Op::JoinOp(Box::new(OpJoin {
@@ -351,6 +370,31 @@ fn plan_joins(
     )
 }
 
+fn _correct_subquery_schema(op: Op, alias: &str) -> Op {
+    let n_cols = op
+        .local_schema()
+        .expect("Subquery must have a local schema plan")
+        .columns
+        .len();
+
+    let mut upper_schema = Vec::<ColRef>::with_capacity(n_cols);
+    for i in 0..n_cols {
+        upper_schema.push(ColRef::TableRef {
+            table: alias.to_string(),
+            column: format!("_{}", i),
+        });
+    }
+
+    let vs = VirtualSchema {
+        columns: upper_schema.clone(),
+    };
+    let ls = Option::Some(LocalSchema {
+        columns: upper_schema,
+    });
+
+    Op::SubqueryProjOp(Box::new(OpSubqueryProj { input: op, vs, ls }))
+}
+
 pub fn plan(query: &Query, meta: &Metadata) -> Op {
     let setexpr = &query.body;
     let select = match setexpr {
@@ -360,7 +404,7 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
 
     let from = &select.from;
 
-    let mut table_namespace = HashMap::<String, String>::new();
+    let mut table_namespace = HashMap::<String, TableSource>::new();
 
     for table in from {
         let relation = &table.relation;
@@ -378,7 +422,24 @@ pub fn plan(query: &Query, meta: &Metadata) -> Op {
                 name.clone()
             };
 
-            table_namespace.insert(alias, name);
+            table_namespace.insert(alias, TableSource::Direct(name));
+        } else if let TableFactor::Derived {
+            lateral: _,
+            subquery,
+            alias,
+        } = relation
+        {
+            let alias = alias
+                .clone()
+                .expect("Subquery must have an alias!")
+                .name
+                .value
+                .to_string();
+
+            let mut op = plan(subquery, meta);
+            op = _correct_subquery_schema(op, &alias);
+
+            table_namespace.insert(alias, TableSource::Subquery(op));
         } else {
             panic!("Not a table");
         }
