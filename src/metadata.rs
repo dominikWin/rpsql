@@ -1,22 +1,24 @@
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
     pub path: String,
     pub buffsize: u64,
     pub tables: Vec<MetaTableDef>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MetaType {
     LONG,
     DEC,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaSchema {
     pub columns: Vec<(String, MetaType)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaTableDef {
     pub name: String,
     pub file: String,
@@ -25,7 +27,7 @@ pub struct MetaTableDef {
 }
 
 impl Metadata {
-    pub fn new() -> Metadata {
+    pub fn from_default() -> Metadata {
         Metadata {
             path: "drivers/sample_queries/data/".to_string(),
             buffsize: 1048576,
@@ -66,5 +68,16 @@ impl Metadata {
                 },
             ],
         }
+    }
+
+    pub fn from_path(path: &str) -> Metadata {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+
+        serde_json::from_str(&data).expect("Failed to parse metadata file!")
     }
 }

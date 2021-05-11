@@ -156,7 +156,7 @@ fn make_scan(table: &str, alias: &str, meta: &Metadata) -> OpScan {
         .iter()
         .filter(|t| t.name == table)
         .last()
-        .unwrap();
+        .expect(&format!("Can't find metadata entry for table {}", table));
 
     OpScan {
         tab_name: table.to_string(),

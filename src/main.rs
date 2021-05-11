@@ -2,6 +2,8 @@ use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
+use clap::{App, Arg};
+
 mod agg_grouping;
 mod conf_writer;
 mod metadata;
@@ -17,15 +19,34 @@ use metadata::*;
 use planner::*;
 
 fn main() {
-    // let sql =
-    //     "SELECT P.COST, P.PKEY FROM PART P, ORDERS O1 WHERE (O1.OKEY = P.PKEY) AND (P.PKEY <= 8) AND O1.OKEY >= 2 AND O1.ZIP <> 3800";
-    let sql = "SELECT O.ZIP, SUM(P.COST)
-        FROM LINEITEM L, PART P, ORDERS O
-        WHERE L.PKEY=P.PKEY AND L.OKEY=O.OKEY
-        GROUP BY O.ZIP
-        ORDER BY O.ZIP ASC";
+    let matches = App::new("Pythia SQL Planner")
+        .version(env!("CARGO_PKG_VERSION"))
+        .arg(
+            Arg::with_name("QUERY")
+                .help("Defines the SQL query to use")
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("explain")
+                .help("Shows a human-readable version of the plan")
+                .long("explain")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("meta_file")
+                .help("Reads the metadata from a json file")
+                .long("meta")
+                .takes_value(true),
+        )
+        .get_matches();
 
-    let meta = Metadata::new();
+    let sql = matches.value_of("QUERY").unwrap();
+
+    let meta = if let Some(meta_path) = matches.value_of("meta_file") {
+        Metadata::from_path(meta_path)
+    } else {
+        Metadata::from_default()
+    };
 
     let dialect = GenericDialect {};
 
@@ -37,5 +58,11 @@ fn main() {
     };
 
     let (exec_plan, _col_names) = plan(&query, &meta);
+
+    if matches.is_present("explain") {
+        println!("{}", exec_plan);
+        return;
+    }
+
     println!("{}", plan_to_json(exec_plan, &meta));
 }
