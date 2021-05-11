@@ -1,0 +1,61 @@
+{
+  "path": "drivers/sample_queries/data/",
+  "buffsize": 1048576,
+  "tables": [
+    {
+      "name": "LINEITEM",
+      "file": "lineitem.tbl.bz2",
+      "filetype": "text",
+      "schema": {
+        "columns": [
+          [
+            "OKEY",
+            "LONG"
+          ],
+          [
+            "PKEY",
+            "LONG"
+          ],
+          [
+            "PRICE",
+            "DEC"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "ORDERS",
+      "file": "order.tbl.bz2",
+      "filetype": "text",
+      "schema": {
+        "columns": [
+          [
+            "OKEY",
+            "LONG"
+          ],
+          [
+            "ZIP",
+            "LONG"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "PART",
+      "file": "part.tbl",
+      "filetype": "text",
+      "schema": {
+        "columns": [
+          [
+            "PKEY",
+            "LONG"
+          ],
+          [
+            "COST",
+            "DEC"
+          ]
+        ]
+      }
+    }
+  ]
+}
