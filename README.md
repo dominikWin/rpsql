@@ -1,11 +1,11 @@
-# pythia-sql
+# rpsql
 
 A very simple heuristic SQL query planner.
 Can output to a format readable by [pythia](https://code.osu.edu/pythia) if processed with convert.py.
 
 ### Usage
 
-`pythia-sql <QUERY>`
+`rpsql <QUERY>`
 
 See `--help` for more.
 

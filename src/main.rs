@@ -19,7 +19,7 @@ use metadata::*;
 use planner::*;
 
 fn main() {
-    let matches = App::new("Pythia SQL Planner")
+    let matches = App::new("RPSQL Query Planner")
         .version(env!("CARGO_PKG_VERSION"))
         .arg(
             Arg::with_name("QUERY")
