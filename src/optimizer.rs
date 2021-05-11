@@ -145,7 +145,7 @@ pub fn local_project(op: Op, target_projection: &[ColRef], force_order: bool) ->
      */
 
     for col in target_projection {
-        debug_assert!(op.virtual_schema().columns.contains(col));
+        assert!(op.virtual_schema().columns.contains(col));
     }
 
     let op = match op {
