@@ -24,7 +24,7 @@ pub fn pushdown_filters(op: Op) -> Op {
                 Op::JoinOp(sub_op) => {
                     if sub_op.build.virtual_schema().contains(&op_filter.field) {
                         Op::JoinOp(Box::new(OpJoin {
-                            build: Op::FilterOp(Box::new(OpFilter {
+                            build: pushdown_filters(Op::FilterOp(Box::new(OpFilter {
                                 input: sub_op.build.clone(),
                                 op: op_filter.op,
                                 field: op_filter.field,
@@ -32,9 +32,9 @@ pub fn pushdown_filters(op: Op) -> Op {
                                 ls: sub_op.build.local_schema(),
                                 vs: sub_op.build.virtual_schema(),
                                 cfg_name: op_filter.cfg_name,
-                            })),
+                            }))),
                             build_join_attribute: sub_op.build_join_attribute.clone(),
-                            probe: sub_op.probe.clone(),
+                            probe: pushdown_filters(sub_op.probe.clone()),
                             probe_join_attribute: sub_op.probe_join_attribute.clone(),
                             ls: sub_op.ls.clone(),
                             vs: sub_op.vs.clone(),
@@ -42,9 +42,9 @@ pub fn pushdown_filters(op: Op) -> Op {
                         }))
                     } else if sub_op.probe.virtual_schema().contains(&op_filter.field) {
                         Op::JoinOp(Box::new(OpJoin {
-                            build: sub_op.build.clone(),
+                            build: pushdown_filters(sub_op.build.clone()),
                             build_join_attribute: sub_op.build_join_attribute.clone(),
-                            probe: Op::FilterOp(Box::new(OpFilter {
+                            probe: pushdown_filters(Op::FilterOp(Box::new(OpFilter {
                                 input: sub_op.probe.clone(),
                                 op: op_filter.op,
                                 field: op_filter.field,
@@ -52,7 +52,7 @@ pub fn pushdown_filters(op: Op) -> Op {
                                 ls: sub_op.probe.local_schema(),
                                 vs: sub_op.probe.virtual_schema(),
                                 cfg_name: op_filter.cfg_name,
-                            })),
+                            }))),
                             probe_join_attribute: sub_op.probe_join_attribute.clone(),
                             ls: sub_op.ls.clone(),
                             vs: sub_op.vs.clone(),
