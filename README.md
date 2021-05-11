@@ -5,6 +5,8 @@ Can output to a format readable by [pythia](https://code.osu.edu/pythia) if proc
 
 ### Usage
 
+An example query and plan is in `sample_query/`.
+
 `rpsql <QUERY>`
 
 See `--help` for more.
